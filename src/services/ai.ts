@@ -6,7 +6,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 export async function runAI(prompt: string): Promise<string> {
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-pro",
+      model: "gemini-2.5-flash-preview-09-2025",
       contents: prompt,
     });
     return response.text || "Không có kết quả. Vui lòng thử lại.";
