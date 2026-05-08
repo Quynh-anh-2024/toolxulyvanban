@@ -1,20 +1,22 @@
 export async function runAI(prompt: string): Promise<string> {
   try {
-    const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+    // Gọi khóa OpenRouter từ Netlify
+    const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
     
     if (!apiKey) {
-        throw new Error("Chưa nạp API Key vào hệ thống. Vui lòng kiểm tra lại Netlify.");
+        throw new Error("Chưa nạp API Key OpenRouter vào hệ thống Netlify.");
     }
     
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    // Gửi tín hiệu sang trạm trung chuyển tại Mỹ
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // Đổi sang mô hình thế hệ mới nhất của Groq tại đây:
-        model: "llama-3.1-8b-instant", 
+        // Sử dụng bộ não khổng lồ Gemini 2.0 (Bản miễn phí qua OpenRouter)
+        model: "google/gemini-2.0-flash-exp:free", 
         messages: [{ role: "user", content: prompt }]
       })
     });
