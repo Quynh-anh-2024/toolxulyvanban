@@ -1,13 +1,11 @@
 export async function runAI(prompt: string): Promise<string> {
   try {
-    // Gọi khóa OpenRouter từ Netlify
     const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
     
     if (!apiKey) {
         throw new Error("Chưa nạp API Key OpenRouter vào hệ thống Netlify.");
     }
     
-    // Gửi tín hiệu sang trạm trung chuyển tại Mỹ
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -15,8 +13,8 @@ export async function runAI(prompt: string): Promise<string> {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // Sử dụng bộ não khổng lồ Gemini 2.0 (Bản miễn phí qua OpenRouter)
-        model: "google/gemini-2.0-flash-lite-preview-02-05:free", 
+        // Sử dụng bộ não của Microsoft: Bộ nhớ khổng lồ 128k, ổn định, miễn phí 100%
+        model: "microsoft/phi-3-medium-128k-instruct:free", 
         messages: [{ role: "user", content: prompt }]
       })
     });
