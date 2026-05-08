@@ -633,6 +633,7 @@ export default function App() {
                     margin-bottom: 0.5rem;
                   }
                   
+                  /* ĐỊNH DẠNG CHUNG CHO CÁC BẢNG (Có viền đen) */
                   .document-content table { 
                     border-collapse: collapse; 
                     width: 100%; 
@@ -641,7 +642,23 @@ export default function App() {
                   .document-content td, .document-content th { 
                     border: 1px solid #000; 
                     padding: 0.5rem; 
-                    text-align: left !important; /* default for cells */
+                    text-align: left !important; 
+                  }
+
+                  /* --- SỬA LỖI KHUNG TIÊU NGỮ (BẢNG ĐẦU TIÊN) --- */
+                  .document-content table:first-of-type,
+                  .document-content table:first-of-type td,
+                  .document-content table:first-of-type th {
+                    border: none !important; /* Ẩn hoàn toàn đường viền */
+                    padding: 0 !important;
+                  }
+                  .document-content table:first-of-type td p,
+                  .document-content table:first-of-type th p {
+                    text-align: center !important; /* Ép căn giữa Quốc hiệu, Tiêu ngữ */
+                    margin-bottom: 2pt !important;
+                  }
+                  .document-content table:first-of-type td:first-child p {
+                     font-weight: bold; /* In đậm tên cơ quan (UBND/Trường) */
                   }
                   
                   /* Reset para formatting in cells */
