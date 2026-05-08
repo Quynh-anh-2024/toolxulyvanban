@@ -13,8 +13,8 @@ export async function runAI(prompt: string): Promise<string> {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // Sử dụng bộ não của Microsoft: Bộ nhớ khổng lồ 128k, ổn định, miễn phí 100%
-        model: "meta-llama/llama-3.1-8b-instruct:free", 
+        // Bật chế độ tự động săn mô hình miễn phí khỏe nhất tại thời điểm sử dụng
+        model: "openrouter/free", 
         messages: [{ role: "user", content: prompt }]
       })
     });
