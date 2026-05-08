@@ -16,7 +16,7 @@ export async function runAI(prompt: string): Promise<string> {
       },
       body: JSON.stringify({
         // Sử dụng bộ não khổng lồ Gemini 2.0 (Bản miễn phí qua OpenRouter)
-        model: "google/gemini-2.0-flash-exp:free", 
+        model: "microsoft/phi-3-medium-128k-instruct:free", 
         messages: [{ role: "user", content: prompt }]
       })
     });
