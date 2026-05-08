@@ -116,61 +116,52 @@ export default function App() {
         "Tóm tắt ngắn gọn, gạch đầu dòng các ý chính yếu của văn bản sau:\n\n" +
         rawText;
     } else if (taskType === "quiz") {
-      // Updated slightly to incorporate user instructions (Phiếu bài tập)
       prompt = 
-        `Dựa vào nội dung văn bản dưới đây, hãy tạo một PHIẾU BÀI TẬP TRẮC NGHIỆM gồm 10 câu hỏi theo ma trận 4-3-3 (Thông tư 27) gồm 3 mức: Nhận biết, Thông hiểu, Vận dụng. Cấu trúc yêu cầu:
-        
+        `Dựa vào văn bản dưới, tạo PHIẾU BÀI TẬP TRẮC NGHIỆM 10 câu (Ma trận 4-3-3: Nhận biết, Thông hiểu, Vận dụng).
+        Cấu trúc:
         # PHIẾU BÀI TẬP ÔN LUYỆN
-        
         ## PHẦN 1: ĐỀ BÀI
-        ### I. Mức 1: Khởi động (Nhận biết - 4 câu)
-        (Liệt kê câu hỏi và 4 đáp án A, B, C, D)
-        ### II. Mức 2: Khám phá (Thông hiểu - 3 câu)
-        (Liệt kê câu hỏi và 4 đáp án A, B, C, D)
-        ### III. Mức 3: Thử thách (Vận dụng - 3 câu)
-        (Liệt kê câu hỏi và 4 đáp án A, B, C, D)
-
-        ## PHẦN 2: ĐÁP ÁN VÀ GỢI Ý CHI TIẾT
-        (in đậm đáp án đúng, kèm giải thích ngắn gọn tại sao chọn đáp án đó)
+        ### I. Mức 1 (4 câu)
+        ### II. Mức 2 (3 câu)
+        ### III. Mức 3 (3 câu)
+        ## PHẦN 2: ĐÁP ÁN (In đậm đáp án, kèm giải thích ngắn)
 
         Văn bản nguồn:
         """\n${rawText}\n"""`;
     } else if (taskType === "proofread") {
-      prompt = `Bạn là một chuyên gia ngôn ngữ, biên tập viên và giáo viên xuất sắc của Việt Nam. Hãy thực hiện kiểm tra và rà soát đoạn văn bản dưới đây.\n\n`;
-      prompt += `🎯 CÁC LỖI CẦN KIỂM TRA QUÁ TRÌNH PHÂN TÍCH:\n`;
-      prompt += `- Lỗi cơ bản: Dấu câu (chấm, phẩy, hỏi, ngã), viết hoa (đúng quy tắc tên riêng, đầu câu), dấu thanh, từ sai chính tả tiếng Việt.\n`;
-      prompt += `- Lỗi đánh máy: Khoảng trắng thừa/thiếu (trước và sau dấu phẩy/chấm), lỗi xuống dòng tùy tiện.\n`;
-      prompt += `- Lỗi quy định: Lỗi thể thức, văn phong không phù hợp với loại hình văn bản.\n\n`;
+      prompt = `Đóng vai chuyên gia ngôn ngữ, rà soát văn bản dưới đây.\n`;
+      prompt += `⚠️ LƯU Ý TỐI QUAN TRỌNG ĐỂ TIẾT KIỆM DUNG LƯỢNG: TUYỆT ĐỐI KHÔNG VIẾT LẠI TOÀN BỘ VĂN BẢN.\n`;
+      prompt += `CHỈ trích xuất các câu/từ bị lỗi và đưa ra cách sửa ngắn gọn.\n\n`;
 
       if (aiMode === "suggest") {
-        prompt += `⚙️ CHẾ ĐỘ LÀM VIỆC: "CHỈ BÁO LỖI".\nBạn CHỈ ĐƯỢC CHỈ RA LỖI SAI VÀ GỢI Ý CÁCH SỬA. TUYỆT ĐỐI KHÔNG tự động viết lại toàn bộ văn bản. Hãy trình bày dưới dạng danh sách (VD: Đoạn chứa lỗi -> Phân tích lỗi -> Cách sửa đề xuất).\n\n`;
+        prompt += `⚙️ CHẾ ĐỘ: CHỈ BÁO LỖI. Lập danh sách ngắn gọn: "Đoạn/Câu chứa lỗi -> Cách sửa -> Lý do".\n\n`;
       } else {
-        prompt += `⚙️ CHẾ ĐỘ LÀM VIỆC: "AI TỰ ĐỘNG SỬA".\nHãy xử lý và trả về TOÀN BỘ VĂN BẢN SAU KHI ĐÃ ĐƯỢC SỬA HOÀN CHỈNH dựa theo phong cách yêu cầu. KHÔNG cần giải thích dài dòng các lỗi.\n\n`;
+        prompt += `⚙️ CHẾ ĐỘ: TỰ ĐỘNG SỬA. CHỈ in ra những ĐOẠN/CÂU CẦN SỬA sau khi đã chỉnh chu. Bỏ qua toàn bộ các đoạn đã đúng để tiết kiệm chữ.\n\n`;
       }
 
-      prompt += `🎨 PHONG CÁCH / MỨC ĐỘ BIÊN TẬP YÊU CẦU:\n`;
+      prompt += `🎨 PHONG CÁCH: `;
       switch (aiStyle) {
         case "spelling":
-          prompt += `Chỉ tập trung sửa đúng lỗi chính tả, lỗi đánh máy, dấu câu, khoảng trắng. BẮT BUỘC giữ nguyên 100% từ vựng và cấu trúc câu gốc.\n\n`;
+          prompt += `Chỉ sửa lỗi chính tả, đánh máy.\n\n`;
           break;
         case "grammar":
-          prompt += `Sửa lỗi chính tả và chỉnh sửa toàn diện cấu trúc ngữ pháp (sửa các câu lủng củng, sai chủ-vị, lặp từ).\n\n`;
+          prompt += `Sửa chính tả & cấu trúc ngữ pháp lủng củng.\n\n`;
           break;
         case "admin":
-          prompt += `Chuẩn hóa văn phong thành thể thức hành chính nhà nước (Chuẩn Nghị định 30). Ngôn ngữ phải trang trọng, khách quan, súc tích.\n\n`;
+          prompt += `Chuẩn hóa hành chính (NĐ 30), trang trọng, súc tích.\n\n`;
           break;
         case "edu":
-          prompt += `Chuẩn hóa theo văn phong sư phạm. Ngôn từ cần chuẩn mực, truyền cảm, loại bỏ các từ ngữ suồng sã, mang tính định hướng giáo dục cao.\n\n`;
+          prompt += `Chuẩn hóa văn phong sư phạm, chuẩn mực, truyền cảm.\n\n`;
           break;
         case "academic":
-          prompt += `Nâng cấp thành văn phong học thuật, báo cáo khoa học. Sử dụng các thuật ngữ chính xác, lập luận chặt chẽ, khách quan.\n\n`;
+          prompt += `Văn phong học thuật, lập luận chặt chẽ.\n\n`;
           break;
         case "original":
-          prompt += `Sửa các lỗi cơ bản (chính tả, khoảng trắng) nhưng BẮT BUỘC phải giữ nguyên văn phong, giọng điệu và phong cách hành văn của tác giả gốc.\n\n`;
+          prompt += `Sửa lỗi cơ bản, BẮT BUỘC giữ nguyên văn phong gốc.\n\n`;
           break;
       }
 
-      prompt += `📄 VĂN BẢN CẦN XỬ LÝ:\n"""\n${rawText}\n"""`;
+      prompt += `📄 VĂN BẢN:\n"""\n${rawText}\n"""`;
     }
 
     try {
@@ -187,7 +178,6 @@ export default function App() {
   const appendAIToDocument = () => {
     if (!aiResult) return;
 
-    // Convert Markdown structure roughly to HTML for Word export
     let text = aiResult
       .replace(/### (.*)/g, "<b>$1</b>")
       .replace(/#### (.*)/g, "<b><i>$1</i></b>")
@@ -562,7 +552,7 @@ export default function App() {
                         Đang xử lý...
                       </>
                     ) : (
-                      "Tạo Phiếu Bài Tập Ôn Luyện (10 câu)"
+                      "Tạo Phiếu Bài Tập (10 câu)"
                     )}
                   </button>
                 </div>
