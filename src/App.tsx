@@ -145,7 +145,7 @@ export default function App() {
           prompt += `Chỉ sửa lỗi chính tả, đánh máy.\n\n`;
           break;
         case "grammar":
-          prompt += `Sửa chính tả & cấu trúc ngữ pháp lủng củng.\n\n`;
+          prompt += `Sửa chính tả & cấu trúc ngữ pháp lủng củng. Nối các câu bị ngắt dòng sai logic do gõ nhầm phím Enter.\n\n`;
           break;
         case "admin":
           prompt += `Chuẩn hóa hành chính (NĐ 30), trang trọng, súc tích.\n\n`;
@@ -603,6 +603,8 @@ export default function App() {
                     color: black;
                     text-align: justify;
                   }
+                  
+                  /* 1. ĐỊNH DẠNG ĐOẠN VĂN CHUẨN (CÓ THỤT LỀ) */
                   .document-content p:not(.ai-wrapper-box p) {
                     font-family: "${config.font}", serif;
                     font-size: ${config.size}pt;
@@ -612,9 +614,25 @@ export default function App() {
                     margin-top: 0pt;
                     margin-bottom: ${config.paraSpacing}pt;
                   }
-                  /* Formatting for Lists, Headings converted to paragraphs */
+
+                  /* 2. SỬA LỖI TIÊU ĐỀ: Tự động phát hiện dòng chỉ có chữ in đậm -> Hủy thụt lề để thẳng hàng với bảng */
+                  .document-content p:has(> strong:only-child),
+                  .document-content p:has(> b:only-child) {
+                    text-indent: 0cm !important;
+                  }
                   
-                  /* Formatting AI block in real-time preview */
+                  /* 3. SỬA LỖI DANH SÁCH (Bullets): Căn chỉnh lại dấu gạch đầu dòng, hủy thụt lề kép */
+                  .document-content ul, .document-content ol {
+                    margin-top: 0;
+                    margin-bottom: ${config.paraSpacing}pt;
+                    padding-left: ${parseFloat(config.textIndent.toString()) + 0.5}cm;
+                  }
+                  .document-content li p {
+                    text-indent: 0cm !important;
+                    margin-bottom: 0 !important;
+                  }
+                  
+                  /* Formatting AI block */
                   .ai-wrapper-box {
                     border-top: 1px dashed black;
                     margin-top: 2rem;
@@ -633,11 +651,18 @@ export default function App() {
                     margin-bottom: 0.5rem;
                   }
                   
-                  /* ĐỊNH DẠNG CHUNG CHO CÁC BẢNG (Có viền đen) */
+                  /* ========================================= */
+                  /* SỬA LỖI BẢNG (TABLE) TRONG GIÁO ÁN / NĐ 30 */
+                  /* ========================================= */
+
+                  /* BẢNG CHUNG: Ép bảng nằm trọn trong trang, không tràn viền */
                   .document-content table { 
-                    border-collapse: collapse; 
                     width: 100%; 
-                    margin-bottom: 1rem; 
+                    max-width: 100%;
+                    box-sizing: border-box;
+                    border-collapse: collapse; 
+                    margin-top: 6pt;
+                    margin-bottom: 12pt; 
                   }
                   .document-content td, .document-content th { 
                     border: 1px solid #000; 
@@ -645,42 +670,50 @@ export default function App() {
                     text-align: left !important; 
                   }
 
-                  /* --- SỬA LỖI KHUNG TIÊU NGỮ (BẢNG ĐẦU TIÊN) --- */
+                  /* Xóa thụt lề cho chữ nằm BÊN TRONG bảng */
+                  .document-content table p, .document-content td p, .document-content th p {
+                    text-indent: 0cm !important;
+                    margin-bottom: 0pt !important;
+                  }
+                  
+                  /* BẢNG ĐẦU TIÊN (Quốc hiệu - Tiêu ngữ) */
                   .document-content table:first-of-type,
                   .document-content table:first-of-type td,
                   .document-content table:first-of-type th {
-                    border: none !important; /* Ẩn hoàn toàn đường viền */
+                    border: none !important; 
                     padding: 0 !important;
                   }
                   .document-content table:first-of-type td p,
                   .document-content table:first-of-type th p {
-                    text-align: center !important; /* Ép căn giữa Quốc hiệu, Tiêu ngữ */
-                    margin-bottom: 2pt !important;
+                    text-align: center !important; 
+                    margin-bottom: 2pt !important; 
                   }
-                  .document-content table:first-of-type td:first-child p {
-                     font-weight: bold; /* In đậm tên cơ quan (UBND/Trường) */
-                  }
-                  
-                  /* Reset para formatting in cells */
-                  .document-content table p, .document-content td p, .document-content th p {
-                    text-indent: 0cm !important;
-                    text-align: left !important;
-                    margin-bottom: 0pt !important;
+                  .document-content table:first-of-type tr:first-child td p {
+                     font-weight: bold; 
                   }
 
-                  .document-content th, .document-content th p {
-                    text-align: center !important;
-                    font-weight: bold !important;
+                  /* BẢNG CUỐI CÙNG (Nơi nhận - Chữ ký) */
+                  .document-content table:last-of-type,
+                  .document-content table:last-of-type td,
+                  .document-content table:last-of-type th {
+                    border: none !important; 
+                    padding: 0 !important;
                   }
-                  
-                  .document-content tr td:first-child, .document-content tr td:first-child p {
-                    text-align: center !important;
-                  }
-                  
-                  .document-content tr td:not(:first-child), .document-content tr td:not(:first-child) p {
+                  .document-content table:last-of-type td:first-child p {
                     text-align: left !important;
                   }
+                  .document-content table:last-of-type td:first-child p:first-child {
+                    font-weight: bold;
+                    font-style: italic; 
+                  }
+                  .document-content table:last-of-type td:last-child p {
+                    text-align: center !important; 
+                  }
+                  .document-content table:last-of-type td:last-child p:first-child {
+                    font-weight: bold; 
+                  }
 
+                  /* Giữ tỷ lệ ảnh */
                   .document-content img { 
                     max-width: 100%; 
                     display: inline-block;
