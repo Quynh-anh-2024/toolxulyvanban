@@ -1,6 +1,5 @@
 export async function runAI(prompt: string): Promise<string> {
   try {
-    // Vite bắt buộc dùng import.meta.env và phải có tiền tố VITE_
     const apiKey = import.meta.env.VITE_GROQ_API_KEY;
     
     if (!apiKey) {
@@ -14,7 +13,8 @@ export async function runAI(prompt: string): Promise<string> {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "llama3-8b-8192", // Tốc độ siêu nhanh
+        // Đổi sang mô hình thế hệ mới nhất của Groq tại đây:
+        model: "llama-3.1-8b-instant", 
         messages: [{ role: "user", content: prompt }]
       })
     });
