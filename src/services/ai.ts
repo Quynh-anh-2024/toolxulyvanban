@@ -14,7 +14,7 @@ export async function runAI(prompt: string): Promise<string> {
       },
       body: JSON.stringify({
         // Sử dụng bộ não của Microsoft: Bộ nhớ khổng lồ 128k, ổn định, miễn phí 100%
-        model: "microsoft/phi-3-medium-128k-instruct:free", 
+        model: "meta-llama/llama-3.1-8b-instruct:free", 
         messages: [{ role: "user", content: prompt }]
       })
     });
