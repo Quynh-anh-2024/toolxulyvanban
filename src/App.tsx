@@ -850,8 +850,8 @@ export default function App() {
                     margin-bottom: 12pt !important;
                     table-layout: fixed !important;
                   }
-                  .document-content .admin-header-table col.admin-left-col { width: 45% !important; }
-                  .document-content .admin-header-table col.admin-right-col { width: 55% !important; }
+                  .document-content .admin-header-table col.admin-left-col { width: 42% !important; }
+                  .document-content .admin-header-table col.admin-right-col { width: 58% !important; }
                   .document-content .admin-header-preview-frame,
                   .document-content .admin-header-preview-frame td,
                   .document-content .admin-header-preview-frame th {
@@ -864,14 +864,26 @@ export default function App() {
                     padding: 0pt 4pt !important;
                     vertical-align: top !important;
                   }
+                  .document-content .admin-header-table,
+                  .document-content .admin-header-table td,
+                  .document-content .admin-header-table th,
+                  .document-content .admin-header-table p,
+                  .document-content .admin-header-table span,
+                  .document-content .admin-header-table strong,
+                  .document-content .admin-header-table b,
+                  .document-content .admin-header-table em,
+                  .document-content .admin-header-table i {
+                    font-family: "Times New Roman", serif !important;
+                    font-size: 13pt !important;
+                  }
                   .document-content .admin-header-table p {
                     text-align: center !important;
                     text-indent: 0cm !important;
                     margin-top: 0pt !important;
                     margin-bottom: 1pt !important;
                     line-height: 1.15 !important;
-                    font-family: "Times New Roman", serif !important;
-                    font-size: 13pt !important;
+                    word-break: normal !important;
+                    overflow-wrap: normal !important;
                   }
                   .document-content .admin-header-table .admin-left-cell,
                   .document-content .admin-header-table .admin-right-cell {
@@ -895,7 +907,7 @@ export default function App() {
                     text-transform: uppercase !important;
                     white-space: nowrap !important;
                     letter-spacing: -0.15pt !important;
-                    font-size: 13pt !important;
+                    font-size: 12.5pt !important;
                   }
                   .document-content .admin-motto-line {
                     font-weight: 700 !important;
