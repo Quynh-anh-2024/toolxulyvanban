@@ -11,8 +11,9 @@ function getConfiguredProvider(): AIProvider {
 }
 
 async function runGemini(prompt: string, apiKey: string): Promise<string> {
+  // Cập nhật model thành gemini-3-flash-preview theo yêu cầu
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -22,6 +23,13 @@ async function runGemini(prompt: string, apiKey: string): Promise<string> {
             role: "user",
             parts: [{ text: prompt }],
           },
+        ],
+        // Tắt bộ lọc an toàn để tránh lỗi chặn nội dung khi duyệt văn bản dài
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
         ],
         generationConfig: {
           temperature: 0.25,
