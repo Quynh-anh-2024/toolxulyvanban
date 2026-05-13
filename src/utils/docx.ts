@@ -9,6 +9,199 @@ export interface FormattingConfig {
   rightMargin: number;
 }
 
+export type DocumentProcessingMode = "preserve" | "nd30" | "textOnly";
+
+export interface DocumentStats {
+  tableCount: number;
+  imageCount: number;
+  firstTableHasBorderRisk: boolean;
+  administrativeHeaderDetected: boolean;
+  signatureTableDetected: boolean;
+  warningMessages: string[];
+}
+
+export interface EnhanceHtmlOptions {
+  mode: DocumentProcessingMode;
+  preserveFirstFrame: boolean;
+}
+
+function normalizeText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasAnyKeyword(text: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => text.includes(normalizeText(keyword)));
+}
+
+function getElementText(el: Element): string {
+  return normalizeText(el.textContent || "");
+}
+
+function tableLooksLikeAdministrativeHeader(table: HTMLTableElement, index: number): boolean {
+  const text = getElementText(table);
+  const hasNationalHeader =
+    text.includes("CONG HOA XA HOI CHU NGHIA VIET NAM") ||
+    (text.includes("DOC LAP") && text.includes("TU DO") && text.includes("HANH PHUC"));
+
+  const hasAgencyHeader = hasAnyKeyword(text, [
+    "UBND",
+    "UY BAN NHAN DAN",
+    "PHONG GIAO DUC",
+    "PHONG GD",
+    "SO GIAO DUC",
+    "TRUONG",
+    "SO:",
+    "Số:",
+  ]);
+
+  return index <= 2 && (hasNationalHeader || hasAgencyHeader);
+}
+
+function tableLooksLikeSignatureBlock(table: HTMLTableElement, index: number, total: number): boolean {
+  const text = getElementText(table);
+  const nearEnd = index >= Math.max(0, total - 2);
+  const hasSignatureKeyword = hasAnyKeyword(text, [
+    "NOI NHAN",
+    "Nơi nhận",
+    "THU TRUONG",
+    "HIỆU TRƯỞNG",
+    "HIEU TRUONG",
+    "NGUOI LAP",
+    "NGƯỜI LẬP",
+    "NGUOI KY",
+    "Ký tên",
+    "KY TEN",
+  ]);
+  return nearEnd && hasSignatureKeyword;
+}
+
+function tableHasLikelyVisibleBorder(table: HTMLTableElement): boolean {
+  const html = table.outerHTML.toLowerCase();
+  return (
+    html.includes("border") ||
+    html.includes("mso-border") ||
+    html.includes("border-top") ||
+    html.includes("border-left") ||
+    html.includes("1px") ||
+    html.includes("solid")
+  );
+}
+
+function markTableCells(table: HTMLTableElement) {
+  table.querySelectorAll("td, th").forEach((cell) => {
+    cell.classList.add("doc-table-cell");
+  });
+}
+
+function cleanupEmptyParagraphs(root: HTMLElement) {
+  root.querySelectorAll("p").forEach((p) => {
+    const text = (p.textContent || "").replace(/\u00a0/g, " ").trim();
+    if (!text && !p.querySelector("img")) {
+      p.classList.add("doc-empty-paragraph");
+    }
+  });
+}
+
+export function analyzeDocumentHtml(htmlString: string): DocumentStats {
+  const tempDiv = document.createElement("div");
+  tempDiv.innerHTML = htmlString;
+
+  const tables = Array.from(tempDiv.querySelectorAll("table")) as HTMLTableElement[];
+  const images = tempDiv.querySelectorAll("img");
+  const firstTable = tables[0];
+
+  const administrativeHeaderDetected = tables.some((table, index) =>
+    tableLooksLikeAdministrativeHeader(table, index)
+  );
+  const signatureTableDetected = tables.some((table, index) =>
+    tableLooksLikeSignatureBlock(table, index, tables.length)
+  );
+  const firstTableHasBorderRisk = !!firstTable && tableHasLikelyVisibleBorder(firstTable);
+
+  const warningMessages: string[] = [];
+  if (tables.length > 0) {
+    warningMessages.push(`Phát hiện ${tables.length} bảng/khung trong tài liệu.`);
+  }
+  if (firstTableHasBorderRisk) {
+    warningMessages.push("Bảng/khung đầu văn bản có dấu hiệu có viền. Không nên tự động xóa viền theo vị trí.");
+  }
+  if (administrativeHeaderDetected) {
+    warningMessages.push("Có dấu hiệu phần thể thức hành chính: cơ quan ban hành/quốc hiệu/tiêu ngữ/số ký hiệu.");
+  }
+  if (images.length > 0) {
+    warningMessages.push(`Phát hiện ${images.length} hình ảnh. Khi xuất Word cần kiểm tra lại kích thước ảnh.`);
+  }
+
+  return {
+    tableCount: tables.length,
+    imageCount: images.length,
+    firstTableHasBorderRisk,
+    administrativeHeaderDetected,
+    signatureTableDetected,
+    warningMessages,
+  };
+}
+
+export function enhanceAdministrativeDocumentHtml(
+  htmlString: string,
+  options: EnhanceHtmlOptions
+): { html: string; stats: DocumentStats } {
+  const tempDiv = document.createElement("div");
+  tempDiv.innerHTML = htmlString;
+
+  cleanupEmptyParagraphs(tempDiv);
+
+  const tables = Array.from(tempDiv.querySelectorAll("table")) as HTMLTableElement[];
+
+  tables.forEach((table, index) => {
+    table.classList.add("doc-table");
+    table.removeAttribute("border");
+    markTableCells(table);
+
+    const isHeader = tableLooksLikeAdministrativeHeader(table, index);
+    const isSignature = tableLooksLikeSignatureBlock(table, index, tables.length);
+
+    table.classList.remove(
+      "admin-header-table",
+      "signature-table",
+      "form-frame-table",
+      "preserved-frame-table"
+    );
+
+    if (options.mode === "textOnly") {
+      table.classList.add("form-frame-table");
+      return;
+    }
+
+    if (isHeader && options.mode === "nd30" && !options.preserveFirstFrame) {
+      table.classList.add("admin-header-table");
+      return;
+    }
+
+    if (isSignature && options.mode === "nd30") {
+      table.classList.add("signature-table");
+      return;
+    }
+
+    if (index === 0 && options.preserveFirstFrame) {
+      table.classList.add("preserved-frame-table");
+      return;
+    }
+
+    table.classList.add("form-frame-table");
+  });
+
+  const stats = analyzeDocumentHtml(tempDiv.innerHTML);
+  return { html: tempDiv.innerHTML, stats };
+}
+
 export function exportToWord(
   previewElement: HTMLElement | null,
   fileName: string,
@@ -32,30 +225,23 @@ export function exportToWord(
   if (spacing === "1.15") lineSpacingPercent = "115%";
   if (spacing === "1.5") lineSpacingPercent = "150%";
 
-  // Clone the element to remove injected React styles or classes if needed, 
-  // but we mostly just need its inner HTML. We strip out unnecessary classes.
   const cloneDiv = previewElement.cloneNode(true) as HTMLElement;
   cloneDiv.querySelectorAll("*").forEach((el) => {
-    // Preserve inline styles for images to retain dimensions from original file
     if (el.tagName.toLowerCase() !== "img") {
-      el.removeAttribute("style");
+      const existingClass = el.getAttribute("class") || "";
+      const isMarkedTable = /doc-table|admin-header-table|signature-table|form-frame-table|preserved-frame-table|doc-table-cell/.test(existingClass);
+      if (!isMarkedTable) el.removeAttribute("style");
     }
   });
-  
-  // Extract base64 images and substitute with Content-IDs
+
   const imagesToEmbed: { id: string; type: string; data: string }[] = [];
-  
   cloneDiv.querySelectorAll("img").forEach((img, index) => {
     const src = img.getAttribute("src");
     if (src && src.startsWith("data:image/")) {
       const parts = src.match(/^data:(image\/[^;]+);base64,(.*)$/);
       if (parts && parts.length === 3) {
         const id = `image_${index}`;
-        imagesToEmbed.push({
-          id: id,
-          type: parts[1],
-          data: parts[2],
-        });
+        imagesToEmbed.push({ id, type: parts[1], data: parts[2] });
         img.setAttribute("src", `cid:${id}`);
       }
     }
@@ -64,22 +250,18 @@ export function exportToWord(
   const cleanHTML = cloneDiv.innerHTML;
 
   const fullHTML = `
-  <html xmlns:o="urn:schemas-microsoft-com:office:office" 
-        xmlns:w="urn:schemas-microsoft-com:office:word" 
+  <html xmlns:o="urn:schemas-microsoft-com:office:office"
+        xmlns:w="urn:schemas-microsoft-com:office:word"
         xmlns="http://www.w3.org/TR/REC-html40">
   <head>
       <meta charset="utf-8">
       <title>Export</title>
       <style>
           body {
-              margin: 0; padding: 0;
+              margin: 0;
+              padding: 0;
               font-family: "${font}", serif;
               font-size: ${size}pt;
-          }
-          @page {
-              mso-page-orientation: portrait;
-              size: 21cm 29.7cm;
-              margin: 2cm ${rightMargin}cm 2cm ${leftMargin}cm;
           }
           @page WordSection1 {
               size: 21cm 29.7cm;
@@ -89,41 +271,78 @@ export function exportToWord(
               mso-paper-source: 0;
           }
           div.WordSection1 { page: WordSection1; }
-          
           p {
-              margin: 0; padding: 0;
+              margin: 0;
+              padding: 0;
               font-family: "${font}", serif;
               font-size: ${size}pt;
               text-align: ${textAlign};
               text-indent: ${textIndent}cm;
               margin-bottom: ${paraSpacing}pt;
-              line-height: ${lineSpacingPercent}; 
+              line-height: ${lineSpacingPercent};
               mso-line-height-rule: exactly;
-              
               mso-pagination: none;
               page-break-inside: auto;
           }
-
-          /* Reset paragraph styles inside tables */
-          table p {
+          .doc-empty-paragraph { margin-bottom: 0pt !important; line-height: 1pt !important; }
+          h1, h2, h3, h4, h5, h6 {
+              font-family: "${font}", serif;
+              page-break-after: auto;
+          }
+          table, .doc-table {
+              border-collapse: collapse;
+              width: 100%;
+              max-width: 100%;
+              table-layout: fixed;
+              margin-top: 6pt;
+              margin-bottom: 12pt;
+          }
+          td, th, .doc-table-cell {
+              border: 1pt solid #000;
+              padding: 4pt;
+              vertical-align: top;
+              font-family: "${font}", serif;
+              font-size: ${size}pt;
+          }
+          table p, td p, th p {
               text-align: left !important;
               text-indent: 0cm !important;
               margin-bottom: 0pt !important;
-              line-height: normal !important;
+              line-height: 115% !important;
           }
           th, th p {
               text-align: center !important;
               font-weight: bold !important;
           }
-          /* Cột STT căn giữa */
-          tr td:first-child, tr td:first-child p {
+          .admin-header-table,
+          .admin-header-table td,
+          .admin-header-table th,
+          .signature-table,
+          .signature-table td,
+          .signature-table th {
+              border: none !important;
+          }
+          .admin-header-table td,
+          .admin-header-table th,
+          .signature-table td,
+          .signature-table th {
+              padding: 0pt 2pt !important;
+          }
+          .admin-header-table p {
               text-align: center !important;
+              text-indent: 0cm !important;
+              margin-bottom: 2pt !important;
           }
-          tr td:not(:first-child), tr td:not(:first-child) p {
-              text-align: left !important;
+          .signature-table td:first-child p { text-align: left !important; }
+          .signature-table td:last-child p { text-align: center !important; }
+          .preserved-frame-table,
+          .preserved-frame-table td,
+          .preserved-frame-table th,
+          .form-frame-table,
+          .form-frame-table td,
+          .form-frame-table th {
+              border: 1pt solid #000 !important;
           }
-
-          /* MS WORD CSS FIXES for AI blocks */
           div.ai-wrapper-box {
               border-top: 1pt dashed #000;
               margin-top: 20pt;
@@ -142,38 +361,19 @@ export function exportToWord(
               margin-top: 4pt !important;
               margin-bottom: 4pt !important;
           }
-
-          h1, h2, h3, h4, h5, h6 {
-              font-family: "${font}", serif;
-              mso-pagination: none;
-              page-break-inside: auto;
-              page-break-after: auto;
-          }
-
-          table { border-collapse: collapse; width: 100%; margin-bottom: 12pt; }
-          td, th { border: 1px solid black; padding: 4pt; }
-          
-          /* Do not force image size, let it use its natural or parsed style dimensions */
-          img { display: inline-block; }
+          img { max-width: 100%; display: inline-block; }
       </style>
   </head>
   <body>
-      <div class="WordSection1">
-          ${cleanHTML}
-      </div>
+      <div class="WordSection1">${cleanHTML}</div>
   </body>
-  </html>
-  `;
+  </html>`;
 
-  // Construct MHTML
   const boundary = "----=_NextPart_MHTML_BOUNDARY";
-  
-  // Convert HTML to base64 safely (handling UTF-8)
   const htmlBase64 = btoa(unescape(encodeURIComponent(fullHTML)));
 
   let mhtml = `MIME-Version: 1.0\r\n`;
   mhtml += `Content-Type: multipart/related; boundary="${boundary}"\r\n\r\n`;
-  
   mhtml += `--${boundary}\r\n`;
   mhtml += `Content-Type: text/html; charset="utf-8"\r\n`;
   mhtml += `Content-Transfer-Encoding: base64\r\n\r\n`;
@@ -203,24 +403,17 @@ export function processHtmlToRemoveBullets(htmlString: string): string {
   const tempDiv = document.createElement("div");
   tempDiv.innerHTML = htmlString;
 
-  const listItems = tempDiv.querySelectorAll("li");
-  listItems.forEach((li) => {
+  tempDiv.querySelectorAll("li").forEach((li) => {
     const p = document.createElement("p");
     p.innerHTML = li.innerHTML;
-    if (li.parentNode) {
-      li.parentNode.replaceChild(p, li);
-    }
+    p.className = li.className;
+    if (li.parentNode) li.parentNode.replaceChild(p, li);
   });
 
-  const lists = tempDiv.querySelectorAll("ul, ol");
-  lists.forEach((list) => {
+  tempDiv.querySelectorAll("ul, ol").forEach((list) => {
     const fragment = document.createDocumentFragment();
-    while (list.firstChild) {
-      fragment.appendChild(list.firstChild);
-    }
-    if (list.parentNode) {
-      list.parentNode.replaceChild(fragment, list);
-    }
+    while (list.firstChild) fragment.appendChild(list.firstChild);
+    if (list.parentNode) list.parentNode.replaceChild(fragment, list);
   });
 
   return tempDiv.innerHTML;
