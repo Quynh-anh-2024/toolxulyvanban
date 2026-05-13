@@ -141,6 +141,26 @@ function firstLineMatching(lines: string[], matcher: (normalized: string) => boo
   return lines.find((line) => matcher(normalizeText(line)));
 }
 
+function firstLineMatchingRaw(lines: string[], matcher: (normalized: string) => boolean): string | undefined {
+  return lines.find((line) => matcher(normalizeText(line)));
+}
+
+function isNationalLine(normalized: string): boolean {
+  return normalized.includes("CONG HOA XA HOI CHU NGHIA VIET NAM");
+}
+
+function isMottoLine(normalized: string): boolean {
+  return normalized.includes("DOC LAP") && normalized.includes("TU DO") && normalized.includes("HANH PHUC");
+}
+
+function isAgencyLine(normalized: string): boolean {
+  return hasAnyKeyword(normalized, ["UBND", "UY BAN NHAN DAN", "PHONG GIAO DUC", "PHONG GD", "SO GIAO DUC", "SO GD", "SỞ GIÁO DỤC"]);
+}
+
+function isNumberLine(normalized: string): boolean {
+  return normalized.startsWith("SO:") || normalized.startsWith("SO ") || normalized.startsWith("SỐ:") || normalized.startsWith("SỐ ");
+}
+
 function lineContainsDate(normalized: string): boolean {
   return normalized.includes("NGAY") && normalized.includes("THANG") && normalized.includes("NAM");
 }
@@ -169,10 +189,21 @@ function extractAdministrativeHeaderData(table: HTMLTableElement) {
   const leftBottom = uniqueCleanLines(getPlainLinesFromCell(row1?.cells?.[0] || null));
   const rightBottom = uniqueCleanLines(getPlainLinesFromCell(row1?.cells?.[1] || null));
 
-  const allLines = uniqueCleanLines(
+  const allCellLines = uniqueCleanLines(
+    Array.from(table.querySelectorAll("td, th"))
+      .flatMap((cell) => getPlainLinesFromCell(cell as HTMLTableCellElement))
+      .filter(Boolean)
+  );
+
+  const allParagraphLines = uniqueCleanLines(
     Array.from(table.querySelectorAll("p"))
       .map((p) => cleanDisplayText(p.textContent || ""))
       .filter(Boolean)
+  );
+
+  const allLines = uniqueCleanLines(
+    allCellLines
+      .concat(allParagraphLines)
       .concat(
         (table.textContent || "")
           .split(/\r?\n+/)
@@ -181,51 +212,78 @@ function extractAdministrativeHeaderData(table: HTMLTableElement) {
       )
   );
 
-  const nationalLine =
-    firstLineMatching(rightTop, (text) => text.includes("CONG HOA XA HOI CHU NGHIA VIET NAM")) ||
-    firstLineMatching(allLines, (text) => text.includes("CONG HOA XA HOI CHU NGHIA VIET NAM")) ||
-    "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM";
-
-  const mottoLine =
-    firstLineMatching(rightTop, (text) => text.includes("DOC LAP") && text.includes("TU DO") && text.includes("HANH PHUC")) ||
-    firstLineMatching(allLines, (text) => text.includes("DOC LAP") && text.includes("TU DO") && text.includes("HANH PHUC")) ||
-    "Độc lập - Tự do - Hạnh phúc";
-
-  const numberLine =
-    firstLineMatching(leftBottom, (text) => text.startsWith("SO:") || text.startsWith("SO ")) ||
-    firstLineMatching(allLines, (text) => text.startsWith("SO:") || text.startsWith("SO ")) ||
-    "Số:        /KH-...";
-
-  const dateLine =
-    firstLineMatching(rightBottom, lineContainsDate) ||
-    firstLineMatching(allLines, lineContainsDate) ||
-    rightBottom[0] ||
-    "..., ngày ... tháng ... năm ...";
-
-  let agencyLines = leftTop.filter((line) => {
-    const text = normalizeText(line);
-    return hasAnyKeyword(text, ["UBND", "UY BAN NHAN DAN", "PHONG GIAO DUC", "PHONG GD", "SO GIAO DUC"]);
-  });
+  // Bên trái: ưu tiên cell trái của hàng đầu, nhưng nếu Mammoth tách sai thì lấy lại từ toàn bảng.
+  let agencyLines = leftTop.filter((line) => isAgencyLine(normalizeText(line)));
+  if (agencyLines.length === 0) {
+    agencyLines = allLines.filter((line) => isAgencyLine(normalizeText(line)));
+  }
 
   let unitLines = leftTop.filter((line) => {
     const text = normalizeText(line);
-    return !agencyLines.some((agency) => normalizeText(agency) === text) &&
-      !text.startsWith("SO:") &&
-      !text.startsWith("SO ") &&
-      !lineContainsDate(text);
+    return (
+      !isAgencyLine(text) &&
+      !isNationalLine(text) &&
+      !isMottoLine(text) &&
+      !isNumberLine(text) &&
+      !lineContainsDate(text)
+    );
   });
+
+  if (unitLines.length === 0) {
+    unitLines = allLines.filter((line) => {
+      const text = normalizeText(line);
+      return (
+        hasAnyKeyword(text, ["TRUONG", "TRƯỜNG", "TRUNG TAM", "PTDT", "THCS", "TIEU HOC", "TIỂU HỌC"]) &&
+        !isAgencyLine(text) &&
+        !isNationalLine(text) &&
+        !isMottoLine(text) &&
+        !isNumberLine(text) &&
+        !lineContainsDate(text)
+      );
+    });
+  }
 
   if (agencyLines.length === 0 && leftTop.length > 0) {
     agencyLines = [leftTop[0]];
-    unitLines = leftTop.slice(1);
+    unitLines = leftTop.slice(1).filter((line) => {
+      const text = normalizeText(line);
+      return !isNumberLine(text) && !lineContainsDate(text) && !isNationalLine(text) && !isMottoLine(text);
+    });
   }
+
+  const nationalLineCandidate =
+    firstLineMatchingRaw(rightTop, isNationalLine) ||
+    firstLineMatchingRaw(allLines, isNationalLine);
+
+  let mottoLineCandidate =
+    firstLineMatchingRaw(rightTop, isMottoLine) ||
+    firstLineMatchingRaw(rightBottom, isMottoLine) ||
+    firstLineMatchingRaw(allLines, isMottoLine);
+
+  // Nếu bản gốc bị nhận nhầm làm trùng quốc hiệu, luôn trả về tiêu ngữ chuẩn.
+  if (!mottoLineCandidate || isNationalLine(normalizeText(mottoLineCandidate))) {
+    mottoLineCandidate = "Độc lập - Tự do - Hạnh phúc";
+  }
+
+  const numberLine =
+    firstLineMatchingRaw(leftBottom, isNumberLine) ||
+    firstLineMatchingRaw(leftTop, isNumberLine) ||
+    firstLineMatchingRaw(allLines, isNumberLine) ||
+    "Số:        /KH-...";
+
+  const dateLine =
+    firstLineMatchingRaw(rightBottom, lineContainsDate) ||
+    firstLineMatchingRaw(rightTop, lineContainsDate) ||
+    firstLineMatchingRaw(allLines, lineContainsDate) ||
+    rightBottom.find((line) => !isMottoLine(normalizeText(line)) && !isNationalLine(normalizeText(line))) ||
+    "..., ngày ... tháng ... năm ...";
 
   return {
     agencyLines: uniqueCleanLines(agencyLines).map(normalizeHeaderLine),
     unitLines: uniqueCleanLines(unitLines).map(normalizeHeaderLine),
     numberLine: normalizeHeaderLine(numberLine),
-    nationalLine: normalizeHeaderLine(nationalLine),
-    mottoLine: normalizeHeaderLine(mottoLine),
+    nationalLine: normalizeHeaderLine(nationalLineCandidate || "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"),
+    mottoLine: normalizeHeaderLine(mottoLineCandidate),
     dateLine: normalizeHeaderLine(dateLine),
   };
 }
@@ -240,11 +298,11 @@ function createCleanAdminParagraph(doc: Document, text: string, className: strin
 function applyCleanAdminCellAttributes(cell: HTMLTableCellElement, side: "left" | "right") {
   cell.className = side === "left" ? "admin-left-cell" : "admin-right-cell";
   cell.setAttribute("valign", "top");
-  cell.setAttribute("width", side === "left" ? "42%" : "58%");
+  cell.setAttribute("width", side === "left" ? "38%" : "62%");
   cell.setAttribute(
     "style",
     [
-      `width:${side === "left" ? "42%" : "58%"}`,
+      `width:${side === "left" ? "38%" : "62%"}`,
       "border:none",
       "mso-border-alt:none",
       "background:transparent",
@@ -254,6 +312,7 @@ function applyCleanAdminCellAttributes(cell: HTMLTableCellElement, side: "left" 
       "font-family:'Times New Roman',serif",
       "font-size:13pt",
       "line-height:115%",
+      "white-space:nowrap",
     ].join(";")
   );
 }
@@ -274,8 +333,8 @@ function createCleanAdministrativeHeaderTable(sourceTable: HTMLTableElement, sho
   const rightCol = doc.createElement("col");
   leftCol.className = "admin-left-col";
   rightCol.className = "admin-right-col";
-  leftCol.setAttribute("style", "width:42%;");
-  rightCol.setAttribute("style", "width:58%;");
+  leftCol.setAttribute("style", "width:38%;");
+  rightCol.setAttribute("style", "width:62%;");
   colgroup.append(leftCol, rightCol);
   table.appendChild(colgroup);
 
@@ -679,7 +738,7 @@ function applyReliableWordHeaderStyles(root: HTMLElement) {
           'text-transform': 'uppercase',
           'white-space': 'nowrap',
           'letter-spacing': '-0.1pt',
-          'font-size': '12.5pt',
+          'font-size': '11pt',
         });
         return;
       }
@@ -689,8 +748,10 @@ function applyReliableWordHeaderStyles(root: HTMLElement) {
           ...baseStyles,
           'font-weight': 'bold',
           'white-space': 'nowrap',
-          'font-size': '13pt',
-          'text-decoration': 'underline',
+          'font-size': '12.5pt',
+          'text-decoration': 'none',
+          'border-bottom': '1pt solid #000',
+          'display': 'inline-block',
         });
         return;
       }
@@ -904,8 +965,8 @@ export function exportToWord(
               font-family: "Times New Roman", serif !important;
               font-size: 13pt !important;
           }
-          .admin-header-table col.admin-left-col { width: 42% !important; }
-          .admin-header-table col.admin-right-col { width: 58% !important; }
+          .admin-header-table col.admin-left-col { width: 38% !important; }
+          .admin-header-table col.admin-right-col { width: 62% !important; }
           .admin-header-table p {
               text-align: center !important;
               text-indent: 0cm !important;
@@ -935,7 +996,7 @@ export function exportToWord(
               text-transform: uppercase !important;
               white-space: nowrap !important;
               letter-spacing: -0.25pt !important;
-              font-size: 12pt !important;
+              font-size: 11pt !important;
           }
           .admin-motto-line {
               font-weight: bold !important;
@@ -943,6 +1004,7 @@ export function exportToWord(
               display: inline-block !important;
               padding-bottom: 1pt !important;
               border-bottom: 1pt solid #000 !important;
+              font-size: 12.5pt !important;
           }
           .admin-date-line {
               text-align: center !important;
