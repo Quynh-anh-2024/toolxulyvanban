@@ -4,10 +4,11 @@ export async function runAI(prompt: string): Promise<string> {
     throw new Error("Nội dung gửi AI đang trống.");
   }
 
+  // Ép hệ thống dùng OpenRouter vì chúng ta đã khai báo khóa trên Cloudflare
   const response = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: trimmedPrompt }),
+    body: JSON.stringify({ provider: "openrouter", prompt: trimmedPrompt }), 
   });
 
   const rawText = await response.text();
@@ -37,6 +38,10 @@ export async function runAI(prompt: string): Promise<string> {
     .trim();
 
   if (geminiText) return geminiText;
+
+  // Bổ sung lệnh trích xuất kết quả chuẩn của OpenRouter
+  const openRouterText = data?.choices?.[0]?.message?.content;
+  if (openRouterText) return openRouterText.trim();
 
   if (typeof rawText === "string" && rawText.trim()) {
     return rawText.trim();
