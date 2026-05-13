@@ -1,38 +1,35 @@
 export type AIProvider = "gemini" | "openrouter";
 
-function getEnvValue(name: string): string {
-  const env = import.meta.env as Record<string, string | undefined>;
-  return (env[name] || "").trim();
-}
-
 export async function runAI(prompt: string): Promise<string> {
   try {
-    const provider = getEnvValue("VITE_AI_PROVIDER").toLowerCase() === "openrouter" ? "openrouter" : "gemini";
+    // Ép cứng hệ thống LUÔN LUÔN dùng OpenRouter (Vì chúng ta đã có Key này)
+    const provider = "openrouter"; 
 
-    // Gọi đến trạm trung chuyển nội bộ của bạn thay vì gọi thẳng Google
     const response = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider, prompt }),
     });
 
-    const data = await response.json();
+    // Bắt lỗi an toàn, chống văng app
+    const textData = await response.text();
+    let data;
+    try {
+      data = JSON.parse(textData);
+    } catch {
+      throw new Error(textData || `Lỗi máy chủ bất thường (${response.status})`);
+    }
 
     if (!response.ok) {
       throw new Error(data?.error || `Lỗi máy chủ trung gian (${response.status})`);
     }
 
-    // Xử lý kết quả trả về tùy theo provider
-    if (provider === "gemini") {
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error("AI không phản hồi nội dung.");
-      return text.trim();
-    } else {
-      const text = data?.choices?.[0]?.message?.content;
-      if (!text) throw new Error("OpenRouter không phản hồi nội dung.");
-      return text.trim();
-    }
+    // Trả kết quả từ OpenRouter
+    const text = data?.choices?.[0]?.message?.content;
+    if (!text) throw new Error("OpenRouter không phản hồi nội dung. Hãy thử lại.");
+    return text.trim();
+    
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "Lỗi kết nối bảo mật.");
+    throw new Error(error instanceof Error ? error.message : "Lỗi kết nối máy chủ AI.");
   }
 }
