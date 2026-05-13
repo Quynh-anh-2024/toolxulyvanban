@@ -370,6 +370,174 @@ export function enhanceAdministrativeDocumentHtml(
   return { html: tempDiv.innerHTML, stats };
 }
 
+
+function setInlineStyles(element: Element, styles: Record<string, string>) {
+  const styleText = Object.entries(styles)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('; ');
+  element.setAttribute('style', styleText);
+}
+
+function stripPreviewOnlyClasses(root: HTMLElement) {
+  root.querySelectorAll('.admin-header-preview-frame').forEach((el) => {
+    el.classList.remove('admin-header-preview-frame');
+  });
+}
+
+function applyReliableWordHeaderStyles(root: HTMLElement) {
+  stripPreviewOnlyClasses(root);
+
+  const headerTables = Array.from(root.querySelectorAll('table.admin-header-table')) as HTMLTableElement[];
+
+  headerTables.forEach((table) => {
+    table.removeAttribute('border');
+    table.removeAttribute('cellpadding');
+    table.removeAttribute('cellspacing');
+    table.setAttribute('cellspacing', '0');
+    table.setAttribute('cellpadding', '0');
+
+    setInlineStyles(table, {
+      width: '100%',
+      'border-collapse': 'collapse',
+      'table-layout': 'fixed',
+      border: 'none',
+      'mso-border-alt': 'none',
+      'margin-top': '0pt',
+      'margin-bottom': '12pt',
+      'font-family': 'Times New Roman, serif',
+      'font-size': '13pt',
+    });
+
+    Array.from(table.rows).forEach((row) => {
+      Array.from(row.cells).forEach((cell, cellIndex) => {
+        const width = cellIndex === 0 ? '42%' : '58%';
+        setInlineStyles(cell, {
+          width,
+          border: 'none',
+          'mso-border-alt': 'none',
+          padding: '0pt 3pt',
+          'vertical-align': 'top',
+          'text-align': 'center',
+          'font-family': 'Times New Roman, serif',
+          'font-size': '13pt',
+          'line-height': '115%',
+          'word-break': 'normal',
+          'overflow-wrap': 'normal',
+        });
+      });
+    });
+
+    const paragraphs = Array.from(table.querySelectorAll('p')) as HTMLParagraphElement[];
+    paragraphs.forEach((paragraph) => {
+      const baseStyles: Record<string, string> = {
+        margin: '0pt',
+        padding: '0pt',
+        'text-align': 'center',
+        'text-indent': '0cm',
+        'font-family': 'Times New Roman, serif',
+        'font-size': '13pt',
+        'line-height': '115%',
+        'mso-line-height-rule': 'exactly',
+        border: 'none',
+        'word-break': 'normal',
+        'overflow-wrap': 'normal',
+      };
+
+      if (paragraph.classList.contains('admin-agency-line')) {
+        setInlineStyles(paragraph, {
+          ...baseStyles,
+          'font-weight': 'normal',
+          'text-transform': 'uppercase',
+        });
+        return;
+      }
+
+      if (paragraph.classList.contains('admin-unit-line')) {
+        setInlineStyles(paragraph, {
+          ...baseStyles,
+          'font-weight': 'bold',
+          'text-transform': 'uppercase',
+        });
+        return;
+      }
+
+      if (paragraph.classList.contains('admin-number-line')) {
+        setInlineStyles(paragraph, {
+          ...baseStyles,
+          'font-weight': 'normal',
+          'white-space': 'nowrap',
+        });
+        return;
+      }
+
+      if (paragraph.classList.contains('admin-national-line')) {
+        setInlineStyles(paragraph, {
+          ...baseStyles,
+          'font-weight': 'bold',
+          'text-transform': 'uppercase',
+          'white-space': 'nowrap',
+          'letter-spacing': '-0.1pt',
+          'font-size': '12.5pt',
+        });
+        return;
+      }
+
+      if (paragraph.classList.contains('admin-motto-line')) {
+        setInlineStyles(paragraph, {
+          ...baseStyles,
+          'font-weight': 'bold',
+          'white-space': 'nowrap',
+          'font-size': '13pt',
+          'text-decoration': 'underline',
+        });
+        return;
+      }
+
+      if (paragraph.classList.contains('admin-date-line')) {
+        setInlineStyles(paragraph, {
+          ...baseStyles,
+          'font-style': 'italic',
+          'white-space': 'nowrap',
+        });
+        return;
+      }
+
+      setInlineStyles(paragraph, baseStyles);
+    });
+  });
+}
+
+function applyReliableWordTitleStyles(root: HTMLElement, font: string, size: number) {
+  root.querySelectorAll('.doc-main-title').forEach((el) => {
+    setInlineStyles(el, {
+      margin: '8pt 0pt 4pt 0pt',
+      padding: '0pt',
+      'text-align': 'center',
+      'text-indent': '0cm',
+      'font-family': `${font}, serif`,
+      'font-size': `${Math.max(size, 14)}pt`,
+      'font-weight': 'bold',
+      'text-transform': 'uppercase',
+      'line-height': '120%',
+      'mso-line-height-rule': 'exactly',
+    });
+  });
+
+  root.querySelectorAll('.doc-sub-title').forEach((el) => {
+    setInlineStyles(el, {
+      margin: '0pt 0pt 3pt 0pt',
+      padding: '0pt',
+      'text-align': 'center',
+      'text-indent': '0cm',
+      'font-family': `${font}, serif`,
+      'font-size': `${size}pt`,
+      'font-weight': 'bold',
+      'line-height': '120%',
+      'mso-line-height-rule': 'exactly',
+    });
+  });
+}
+
 export function exportToWord(
   previewElement: HTMLElement | null,
   fileName: string,
@@ -394,13 +562,18 @@ export function exportToWord(
   if (spacing === "1.5") lineSpacingPercent = "150%";
 
   const cloneDiv = previewElement.cloneNode(true) as HTMLElement;
+
+  // Khi xuất Word, không dùng lại style trình duyệt vì Word rất dễ hiểu sai
+  // kích thước chữ, viền bảng và khoảng cách. Chỉ giữ style ảnh; còn lại
+  // được chuẩn hóa lại bằng CSS/inline style phía dưới.
   cloneDiv.querySelectorAll("*").forEach((el) => {
     if (el.tagName.toLowerCase() !== "img") {
-      const existingClass = el.getAttribute("class") || "";
-      const isMarkedTable = /doc-table|admin-header-table|admin-header-preview-frame|signature-table|form-frame-table|preserved-frame-table|doc-table-cell|doc-main-title|doc-sub-title/.test(existingClass);
-      if (!isMarkedTable) el.removeAttribute("style");
+      el.removeAttribute("style");
     }
   });
+
+  applyReliableWordHeaderStyles(cloneDiv);
+  applyReliableWordTitleStyles(cloneDiv, font, size);
 
   const imagesToEmbed: { id: string; type: string; data: string }[] = [];
   cloneDiv.querySelectorAll("img").forEach((img, index) => {
@@ -519,8 +692,8 @@ export function exportToWord(
               margin-bottom: 12pt !important;
               table-layout: fixed !important;
           }
-          .admin-header-table col.admin-left-col { width: 45% !important; }
-          .admin-header-table col.admin-right-col { width: 55% !important; }
+          .admin-header-table col.admin-left-col { width: 42% !important; }
+          .admin-header-table col.admin-right-col { width: 58% !important; }
           .admin-header-table p {
               text-align: center !important;
               text-indent: 0cm !important;
@@ -550,7 +723,7 @@ export function exportToWord(
               text-transform: uppercase !important;
               white-space: nowrap !important;
               letter-spacing: -0.15pt !important;
-              font-size: 13pt !important;
+              font-size: 12.5pt !important;
           }
           .admin-motto-line {
               font-weight: bold !important;
