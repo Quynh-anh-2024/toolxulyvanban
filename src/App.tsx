@@ -71,9 +71,7 @@ export default function App() {
 
   const [aiMode, setAiMode] = useState("suggest");
   const [aiStyle, setAiStyle] = useState("edu");
-
   const previewRef = useRef<HTMLDivElement>(null);
-
 
   const rebuildDocumentHtml = (
     html: string,
@@ -579,6 +577,16 @@ export default function App() {
               </h2>
 
               <div className="space-y-4">
+                <div className="bg-white p-3 rounded-md border border-indigo-100">
+                  <div className="flex items-start gap-2 text-xs text-indigo-900 leading-relaxed">
+                    <ShieldCheck className="w-4 h-4 mt-0.5 text-indigo-600 shrink-0" />
+                    <p>
+                      AI đã được cấu hình sẵn bằng biến môi trường trên Cloudflare Pages.
+                      Người dùng chỉ cần bấm xử lý, không cần nhập API key trong app.
+                    </p>
+                  </div>
+                </div>
+
                 <div className="bg-white p-3 rounded-md border border-indigo-100">
                   <label className="block text-xs font-bold text-indigo-800 uppercase mb-2">
                     Chế độ làm việc
