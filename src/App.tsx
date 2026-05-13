@@ -351,7 +351,7 @@ export default function App() {
                     <span>
                       <b>Chuẩn hóa theo NĐ 30</b>
                       <br />
-                      <span className="text-xs text-slate-500">Chỉ bỏ viền khi nhận diện đúng phần thể thức/chữ ký.</span>
+                      <span className="text-xs text-slate-500">Ẩn khung kỹ thuật ở phần đầu khi xuất Word, căn lại tiêu đề văn bản.</span>
                     </span>
                   </label>
                   <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
@@ -377,9 +377,9 @@ export default function App() {
                     onChange={(e) => handlePreserveFirstFrameChange(e.target.checked)}
                   />
                   <span>
-                    <b>Giữ nguyên khung/bảng đầu văn bản</b>
+                    <b>Hiển thị khung hỗ trợ ở bản xem trước</b>
                     <br />
-                    <span className="text-xs text-amber-700">Khuyến nghị bật khi văn bản hành chính có ô/kẻ khung ở phần đầu.</span>
+                    <span className="text-xs text-amber-700">Khung phần đầu hành chính chỉ hiện để kiểm tra; khi tải xuống Word sẽ tự ẩn nếu đó là bảng thể thức.</span>
                   </span>
                 </label>
 
@@ -726,7 +726,7 @@ export default function App() {
                 Tải Xuống File Word (.doc)
               </button>
               <p className="text-xs text-slate-500 mt-2 text-center">
-                Tự động chống đè chữ và ép đúng lề.
+                Khi xuất Word sẽ ẩn khung kỹ thuật phần đầu hành chính và giữ khung thật của biểu mẫu/bảng nội dung.
               </p>
             </section>
           </aside>
@@ -845,15 +845,50 @@ export default function App() {
                   .document-content .signature-table th {
                     border: none !important;
                   }
+                  .document-content .admin-header-table {
+                    margin-top: 0 !important;
+                    margin-bottom: 10pt !important;
+                  }
+                  .document-content .admin-header-preview-frame,
+                  .document-content .admin-header-preview-frame td,
+                  .document-content .admin-header-preview-frame th {
+                    border: 1px dashed #94a3b8 !important;
+                  }
                   .document-content .admin-header-table td,
                   .document-content .admin-header-table th,
                   .document-content .signature-table td,
                   .document-content .signature-table th {
-                    padding: 0 2pt !important;
+                    padding: 2pt 5pt !important;
                   }
                   .document-content .admin-header-table p {
                     text-align: center !important;
+                    text-indent: 0cm !important;
                     margin-bottom: 2pt !important;
+                    line-height: 1.15 !important;
+                  }
+                  .document-content .admin-header-table td:first-child p,
+                  .document-content .admin-header-table th:first-child p,
+                  .document-content .admin-header-table td:last-child p,
+                  .document-content .admin-header-table th:last-child p {
+                    text-align: center !important;
+                  }
+                  .document-content .doc-main-title {
+                    text-align: center !important;
+                    text-indent: 0cm !important;
+                    font-weight: 700 !important;
+                    text-transform: uppercase;
+                    font-size: ${Math.max(config.size, 14)}pt !important;
+                    margin-top: 10pt !important;
+                    margin-bottom: 4pt !important;
+                    line-height: 1.2 !important;
+                  }
+                  .document-content .doc-sub-title {
+                    text-align: center !important;
+                    text-indent: 0cm !important;
+                    font-weight: 700 !important;
+                    margin-top: 0pt !important;
+                    margin-bottom: 3pt !important;
+                    line-height: 1.2 !important;
                   }
                   .document-content .signature-table td:first-child p {
                     text-align: left !important;
