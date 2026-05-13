@@ -101,6 +101,210 @@ function markTableCells(table: HTMLTableElement) {
 }
 
 
+function cleanDisplayText(value: string): string {
+  return (value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .trim();
+}
+
+function getPlainLinesFromCell(cell?: HTMLTableCellElement | null): string[] {
+  if (!cell) return [];
+  const paragraphLines = Array.from(cell.querySelectorAll("p"))
+    .map((p) => cleanDisplayText(p.textContent || ""))
+    .filter(Boolean);
+
+  if (paragraphLines.length > 0) return paragraphLines;
+
+  return (cell.textContent || "")
+    .split(/\r?\n+/)
+    .map(cleanDisplayText)
+    .filter(Boolean);
+}
+
+function uniqueCleanLines(lines: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  lines.forEach((line) => {
+    const cleaned = cleanDisplayText(line);
+    if (!cleaned) return;
+    const key = normalizeText(cleaned);
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(cleaned);
+  });
+  return result;
+}
+
+function firstLineMatching(lines: string[], matcher: (normalized: string) => boolean): string | undefined {
+  return lines.find((line) => matcher(normalizeText(line)));
+}
+
+function lineContainsDate(normalized: string): boolean {
+  return normalized.includes("NGAY") && normalized.includes("THANG") && normalized.includes("NAM");
+}
+
+function normalizeHeaderLine(line: string): string {
+  const normalized = normalizeText(line);
+
+  if (normalized.includes("CONG HOA XA HOI CHU NGHIA VIET NAM")) {
+    return "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM";
+  }
+
+  if (normalized.includes("DOC LAP") && normalized.includes("TU DO") && normalized.includes("HANH PHUC")) {
+    return "Độc lập - Tự do - Hạnh phúc";
+  }
+
+  return cleanDisplayText(line);
+}
+
+function extractAdministrativeHeaderData(table: HTMLTableElement) {
+  const rows = Array.from(table.rows);
+  const row0 = rows[0];
+  const row1 = rows[1];
+
+  const leftTop = uniqueCleanLines(getPlainLinesFromCell(row0?.cells?.[0] || null));
+  const rightTop = uniqueCleanLines(getPlainLinesFromCell(row0?.cells?.[1] || null));
+  const leftBottom = uniqueCleanLines(getPlainLinesFromCell(row1?.cells?.[0] || null));
+  const rightBottom = uniqueCleanLines(getPlainLinesFromCell(row1?.cells?.[1] || null));
+
+  const allLines = uniqueCleanLines(
+    Array.from(table.querySelectorAll("p"))
+      .map((p) => cleanDisplayText(p.textContent || ""))
+      .filter(Boolean)
+      .concat(
+        (table.textContent || "")
+          .split(/\r?\n+/)
+          .map(cleanDisplayText)
+          .filter(Boolean)
+      )
+  );
+
+  const nationalLine =
+    firstLineMatching(rightTop, (text) => text.includes("CONG HOA XA HOI CHU NGHIA VIET NAM")) ||
+    firstLineMatching(allLines, (text) => text.includes("CONG HOA XA HOI CHU NGHIA VIET NAM")) ||
+    "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM";
+
+  const mottoLine =
+    firstLineMatching(rightTop, (text) => text.includes("DOC LAP") && text.includes("TU DO") && text.includes("HANH PHUC")) ||
+    firstLineMatching(allLines, (text) => text.includes("DOC LAP") && text.includes("TU DO") && text.includes("HANH PHUC")) ||
+    "Độc lập - Tự do - Hạnh phúc";
+
+  const numberLine =
+    firstLineMatching(leftBottom, (text) => text.startsWith("SO:") || text.startsWith("SO ")) ||
+    firstLineMatching(allLines, (text) => text.startsWith("SO:") || text.startsWith("SO ")) ||
+    "Số:        /KH-...";
+
+  const dateLine =
+    firstLineMatching(rightBottom, lineContainsDate) ||
+    firstLineMatching(allLines, lineContainsDate) ||
+    rightBottom[0] ||
+    "..., ngày ... tháng ... năm ...";
+
+  let agencyLines = leftTop.filter((line) => {
+    const text = normalizeText(line);
+    return hasAnyKeyword(text, ["UBND", "UY BAN NHAN DAN", "PHONG GIAO DUC", "PHONG GD", "SO GIAO DUC"]);
+  });
+
+  let unitLines = leftTop.filter((line) => {
+    const text = normalizeText(line);
+    return !agencyLines.some((agency) => normalizeText(agency) === text) &&
+      !text.startsWith("SO:") &&
+      !text.startsWith("SO ") &&
+      !lineContainsDate(text);
+  });
+
+  if (agencyLines.length === 0 && leftTop.length > 0) {
+    agencyLines = [leftTop[0]];
+    unitLines = leftTop.slice(1);
+  }
+
+  return {
+    agencyLines: uniqueCleanLines(agencyLines).map(normalizeHeaderLine),
+    unitLines: uniqueCleanLines(unitLines).map(normalizeHeaderLine),
+    numberLine: normalizeHeaderLine(numberLine),
+    nationalLine: normalizeHeaderLine(nationalLine),
+    mottoLine: normalizeHeaderLine(mottoLine),
+    dateLine: normalizeHeaderLine(dateLine),
+  };
+}
+
+function createCleanAdminParagraph(doc: Document, text: string, className: string): HTMLParagraphElement {
+  const p = doc.createElement("p");
+  p.className = className;
+  p.textContent = text;
+  return p;
+}
+
+function applyCleanAdminCellAttributes(cell: HTMLTableCellElement, side: "left" | "right") {
+  cell.className = side === "left" ? "admin-left-cell" : "admin-right-cell";
+  cell.setAttribute("valign", "top");
+  cell.setAttribute("width", side === "left" ? "42%" : "58%");
+  cell.setAttribute(
+    "style",
+    [
+      `width:${side === "left" ? "42%" : "58%"}`,
+      "border:none",
+      "mso-border-alt:none",
+      "background:transparent",
+      "padding:0pt 4pt",
+      "vertical-align:top",
+      "text-align:center",
+      "font-family:'Times New Roman',serif",
+      "font-size:13pt",
+      "line-height:115%",
+    ].join(";")
+  );
+}
+
+function createCleanAdministrativeHeaderTable(sourceTable: HTMLTableElement, showPreviewFrame: boolean): HTMLTableElement {
+  const doc = sourceTable.ownerDocument;
+  const data = extractAdministrativeHeaderData(sourceTable);
+
+  const table = doc.createElement("table");
+  table.className = `doc-table admin-header-table${showPreviewFrame ? " admin-header-preview-frame" : ""}`;
+  table.setAttribute("cellspacing", "0");
+  table.setAttribute("cellpadding", "0");
+  table.setAttribute("border", "0");
+  table.setAttribute("style", "width:100%;border-collapse:collapse;table-layout:fixed;border:none;background:transparent;margin:0 0 12pt 0;");
+
+  const colgroup = doc.createElement("colgroup");
+  const leftCol = doc.createElement("col");
+  const rightCol = doc.createElement("col");
+  leftCol.className = "admin-left-col";
+  rightCol.className = "admin-right-col";
+  leftCol.setAttribute("style", "width:42%;");
+  rightCol.setAttribute("style", "width:58%;");
+  colgroup.append(leftCol, rightCol);
+  table.appendChild(colgroup);
+
+  const firstRow = table.insertRow();
+  const leftTopCell = firstRow.insertCell();
+  const rightTopCell = firstRow.insertCell();
+  applyCleanAdminCellAttributes(leftTopCell, "left");
+  applyCleanAdminCellAttributes(rightTopCell, "right");
+
+  const agencyLines = data.agencyLines.length ? data.agencyLines : [""];
+  agencyLines.forEach((line) => leftTopCell.appendChild(createCleanAdminParagraph(doc, line, "admin-agency-line")));
+  data.unitLines.forEach((line) => leftTopCell.appendChild(createCleanAdminParagraph(doc, line, "admin-unit-line")));
+
+  rightTopCell.appendChild(createCleanAdminParagraph(doc, data.nationalLine, "admin-national-line"));
+  rightTopCell.appendChild(createCleanAdminParagraph(doc, data.mottoLine, "admin-motto-line"));
+
+  const secondRow = table.insertRow();
+  const leftBottomCell = secondRow.insertCell();
+  const rightBottomCell = secondRow.insertCell();
+  applyCleanAdminCellAttributes(leftBottomCell, "left");
+  applyCleanAdminCellAttributes(rightBottomCell, "right");
+
+  leftBottomCell.appendChild(createCleanAdminParagraph(doc, data.numberLine, "admin-number-line"));
+  rightBottomCell.appendChild(createCleanAdminParagraph(doc, data.dateLine, "admin-date-line"));
+
+  return table;
+}
+
+
 function ensureAdminHeaderColumns(table: HTMLTableElement) {
   const existingColGroup = table.querySelector("colgroup");
   if (existingColGroup) existingColGroup.remove();
@@ -339,13 +543,11 @@ export function enhanceAdministrativeDocumentHtml(
     }
 
     if (isHeader) {
-      // Bảng đầu văn bản hành chính thường chỉ là bảng kỹ thuật để căn 2 cột.
-      // Mặc định ẩn viền trong preview và khi xuất Word; chỉ hiện nét đứt khi người dùng bật khung hỗ trợ.
-      table.classList.add("admin-header-table");
-      markAdministrativeHeaderCellContent(table);
-      if (options.preserveFirstFrame) {
-        table.classList.add("admin-header-preview-frame");
-      }
+      // Dựng lại riêng bảng thể thức hành chính bằng cấu trúc sạch.
+      // Không giữ lại style/thuộc tính do Mammoth sinh ra vì Word dễ hiểu sai
+      // thành font phóng to, nền xám, viền thật hoặc cột thụt thò.
+      const cleanHeaderTable = createCleanAdministrativeHeaderTable(table, options.preserveFirstFrame);
+      table.replaceWith(cleanHeaderTable);
       return;
     }
 
@@ -567,9 +769,13 @@ export function exportToWord(
   // kích thước chữ, viền bảng và khoảng cách. Chỉ giữ style ảnh; còn lại
   // được chuẩn hóa lại bằng CSS/inline style phía dưới.
   cloneDiv.querySelectorAll("*").forEach((el) => {
-    if (el.tagName.toLowerCase() !== "img") {
-      el.removeAttribute("style");
-    }
+    const tag = el.tagName.toLowerCase();
+    Array.from(el.attributes).forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      if (name === "class") return;
+      if (tag === "img" && ["src", "alt", "title"].includes(name)) return;
+      el.removeAttribute(attr.name);
+    });
   });
 
   applyReliableWordHeaderStyles(cloneDiv);
@@ -680,6 +886,8 @@ export function exportToWord(
           .signature-table td,
           .signature-table th {
               border: none !important;
+              background: transparent !important;
+              background-color: transparent !important;
           }
           .admin-header-table td,
           .admin-header-table th,
@@ -691,6 +899,10 @@ export function exportToWord(
               margin-top: 0pt !important;
               margin-bottom: 12pt !important;
               table-layout: fixed !important;
+              width: 100% !important;
+              border-collapse: collapse !important;
+              font-family: "Times New Roman", serif !important;
+              font-size: 13pt !important;
           }
           .admin-header-table col.admin-left-col { width: 42% !important; }
           .admin-header-table col.admin-right-col { width: 58% !important; }
@@ -722,8 +934,8 @@ export function exportToWord(
               font-weight: bold !important;
               text-transform: uppercase !important;
               white-space: nowrap !important;
-              letter-spacing: -0.15pt !important;
-              font-size: 12.5pt !important;
+              letter-spacing: -0.25pt !important;
+              font-size: 12pt !important;
           }
           .admin-motto-line {
               font-weight: bold !important;
