@@ -100,6 +100,62 @@ function markTableCells(table: HTMLTableElement) {
   });
 }
 
+
+function paragraphLooksLikeMainAdministrativeTitle(text: string): boolean {
+  const normalized = normalizeText(text);
+  const compact = normalized.replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+
+  return [
+    "KE HOACH",
+    "QUYET DINH",
+    "CONG VAN",
+    "TO TRINH",
+    "BAO CAO",
+    "BIEN BAN",
+    "THONG BAO",
+    "GIAY MOI",
+    "GIAY MOI HOP",
+    "DON",
+    "DE NGHI",
+    "PHIEU",
+    "DANH SACH",
+    "CHUONG TRINH",
+  ].some((title) => compact === title || compact.startsWith(title + " "));
+}
+
+function paragraphLooksLikeAdministrativeSubtitle(text: string): boolean {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  if (normalized.length > 180) return false;
+  if (/^(I|II|III|IV|V|A|B|C)[\.\)]\s/.test(normalized)) return false;
+  if (/^\d+[\.\)]\s/.test(normalized)) return false;
+  if (normalized.startsWith("CAN CU") || normalized.startsWith("THUC HIEN")) return false;
+  return true;
+}
+
+function markAdministrativeTitleParagraphs(root: HTMLElement) {
+  const paragraphs = Array.from(root.querySelectorAll("p")) as HTMLParagraphElement[];
+  const contentParagraphs = paragraphs.filter((p) => !p.closest("table"));
+
+  const searchArea = contentParagraphs.slice(0, 12);
+  const mainTitleIndex = searchArea.findIndex((p) => paragraphLooksLikeMainAdministrativeTitle(p.textContent || ""));
+
+  if (mainTitleIndex < 0) return;
+
+  const mainTitle = searchArea[mainTitleIndex];
+  mainTitle.classList.add("doc-main-title");
+
+  let subtitleCount = 0;
+  for (let i = mainTitleIndex + 1; i < searchArea.length && subtitleCount < 4; i += 1) {
+    const paragraph = searchArea[i];
+    const text = paragraph.textContent || "";
+    if (!paragraphLooksLikeAdministrativeSubtitle(text)) break;
+
+    paragraph.classList.add("doc-sub-title");
+    subtitleCount += 1;
+  }
+}
+
 function cleanupEmptyParagraphs(root: HTMLElement) {
   root.querySelectorAll("p").forEach((p) => {
     const text = (p.textContent || "").replace(/\u00a0/g, " ").trim();
@@ -170,6 +226,7 @@ export function enhanceAdministrativeDocumentHtml(
 
     table.classList.remove(
       "admin-header-table",
+      "admin-header-preview-frame",
       "signature-table",
       "form-frame-table",
       "preserved-frame-table"
@@ -180,8 +237,13 @@ export function enhanceAdministrativeDocumentHtml(
       return;
     }
 
-    if (isHeader && options.mode === "nd30" && !options.preserveFirstFrame) {
+    if (isHeader) {
+      // Bảng đầu văn bản hành chính thường chỉ là bảng kỹ thuật để căn 2 cột.
+      // Khi preview có thể hiện viền hỗ trợ kiểm tra, nhưng khi xuất Word phải ẩn viền.
       table.classList.add("admin-header-table");
+      if (options.preserveFirstFrame) {
+        table.classList.add("admin-header-preview-frame");
+      }
       return;
     }
 
@@ -191,12 +253,16 @@ export function enhanceAdministrativeDocumentHtml(
     }
 
     if (index === 0 && options.preserveFirstFrame) {
+      // Chỉ giữ viền bảng đầu khi KHÔNG phải phần thể thức hành chính
+      // ví dụ: phiếu biểu mẫu, bảng thống kê, khung thông tin cần in thật.
       table.classList.add("preserved-frame-table");
       return;
     }
 
     table.classList.add("form-frame-table");
   });
+
+  markAdministrativeTitleParagraphs(tempDiv);
 
   const stats = analyzeDocumentHtml(tempDiv.innerHTML);
   return { html: tempDiv.innerHTML, stats };
@@ -229,7 +295,7 @@ export function exportToWord(
   cloneDiv.querySelectorAll("*").forEach((el) => {
     if (el.tagName.toLowerCase() !== "img") {
       const existingClass = el.getAttribute("class") || "";
-      const isMarkedTable = /doc-table|admin-header-table|signature-table|form-frame-table|preserved-frame-table|doc-table-cell/.test(existingClass);
+      const isMarkedTable = /doc-table|admin-header-table|admin-header-preview-frame|signature-table|form-frame-table|preserved-frame-table|doc-table-cell|doc-main-title|doc-sub-title/.test(existingClass);
       if (!isMarkedTable) el.removeAttribute("style");
     }
   });
@@ -289,6 +355,24 @@ export function exportToWord(
               font-family: "${font}", serif;
               page-break-after: auto;
           }
+          .doc-main-title {
+              text-align: center !important;
+              text-indent: 0cm !important;
+              font-weight: bold !important;
+              text-transform: uppercase;
+              font-size: ${Math.max(size, 14)}pt !important;
+              margin-top: 8pt !important;
+              margin-bottom: 4pt !important;
+              line-height: 120% !important;
+          }
+          .doc-sub-title {
+              text-align: center !important;
+              text-indent: 0cm !important;
+              font-weight: bold !important;
+              margin-top: 0pt !important;
+              margin-bottom: 3pt !important;
+              line-height: 120% !important;
+          }
           table, .doc-table {
               border-collapse: collapse;
               width: 100%;
@@ -328,10 +412,23 @@ export function exportToWord(
           .signature-table th {
               padding: 0pt 2pt !important;
           }
+          .admin-header-table {
+              margin-top: 0pt !important;
+              margin-bottom: 8pt !important;
+          }
           .admin-header-table p {
               text-align: center !important;
               text-indent: 0cm !important;
               margin-bottom: 2pt !important;
+              line-height: 115% !important;
+          }
+          .admin-header-table td:first-child p,
+          .admin-header-table th:first-child p {
+              text-align: center !important;
+          }
+          .admin-header-table td:last-child p,
+          .admin-header-table th:last-child p {
+              text-align: center !important;
           }
           .signature-table td:first-child p { text-align: left !important; }
           .signature-table td:last-child p { text-align: center !important; }
