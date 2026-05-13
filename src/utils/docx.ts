@@ -101,6 +101,107 @@ function markTableCells(table: HTMLTableElement) {
 }
 
 
+function ensureAdminHeaderColumns(table: HTMLTableElement) {
+  const existingColGroup = table.querySelector("colgroup");
+  if (existingColGroup) existingColGroup.remove();
+
+  const colgroup = document.createElement("colgroup");
+  const leftCol = document.createElement("col");
+  const rightCol = document.createElement("col");
+  leftCol.className = "admin-left-col";
+  rightCol.className = "admin-right-col";
+  colgroup.appendChild(leftCol);
+  colgroup.appendChild(rightCol);
+  table.insertBefore(colgroup, table.firstChild);
+}
+
+function mergeBrokenNationalHeaderParagraphs(cell: Element) {
+  const paragraphs = Array.from(cell.querySelectorAll("p")) as HTMLParagraphElement[];
+
+  for (let index = 0; index < paragraphs.length - 1; index += 1) {
+    const current = paragraphs[index];
+    const next = paragraphs[index + 1];
+    const currentText = normalizeText(current.textContent || "");
+    const nextText = normalizeText(next.textContent || "");
+
+    if (
+      currentText.includes("CONG HOA XA HOI CHU NGHIA VIET") &&
+      (nextText === "NAM" || nextText === "VIET NAM")
+    ) {
+      current.textContent = "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM";
+      next.remove();
+    }
+  }
+}
+
+function markAdministrativeHeaderCellContent(table: HTMLTableElement) {
+  ensureAdminHeaderColumns(table);
+
+  const rows = Array.from(table.rows);
+  rows.forEach((row) => {
+    Array.from(row.cells).forEach((cell, cellIndex) => {
+      cell.classList.add(cellIndex === 0 ? "admin-left-cell" : "admin-right-cell");
+      mergeBrokenNationalHeaderParagraphs(cell);
+
+      const paragraphs = Array.from(cell.querySelectorAll("p")) as HTMLParagraphElement[];
+      paragraphs.forEach((paragraph) => {
+        const text = normalizeText(paragraph.textContent || "");
+        paragraph.classList.remove(
+          "admin-agency-line",
+          "admin-unit-line",
+          "admin-number-line",
+          "admin-national-line",
+          "admin-motto-line",
+          "admin-date-line"
+        );
+
+        if (!text) return;
+
+        if (text.includes("CONG HOA XA HOI CHU NGHIA VIET NAM")) {
+          paragraph.textContent = "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM";
+          paragraph.classList.add("admin-national-line");
+          return;
+        }
+
+        if (text.includes("DOC LAP") && text.includes("TU DO") && text.includes("HANH PHUC")) {
+          paragraph.textContent = "Độc lập - Tự do - Hạnh phúc";
+          paragraph.classList.add("admin-motto-line");
+          return;
+        }
+
+        if (/^(.*NGAY\s+\d{1,2}\s+THANG\s+\d{1,2}\s+NAM\s+\d{4}|.*NGAY\s+\d{1,2}\s+THANG\s+\d{1,2}\s+NAM)$/.test(text)) {
+          paragraph.classList.add("admin-date-line");
+          return;
+        }
+
+        if (/^\d{4}$/.test(text)) {
+          const prev = paragraph.previousElementSibling as HTMLElement | null;
+          if (prev?.classList.contains("admin-date-line")) {
+            prev.textContent = `${prev.textContent || ""} ${paragraph.textContent || ""}`.replace(/\s+/g, " ").trim();
+            paragraph.remove();
+          }
+          return;
+        }
+
+        if (text.startsWith("SO:") || text.startsWith("SỐ:") || text.startsWith("SO ")) {
+          paragraph.classList.add("admin-number-line");
+          return;
+        }
+
+        if (cellIndex === 0 && hasAnyKeyword(text, ["UBND", "UY BAN NHAN DAN", "PHONG GIAO DUC", "PHONG GD", "SO GIAO DUC"])) {
+          paragraph.classList.add("admin-agency-line");
+          return;
+        }
+
+        if (cellIndex === 0 && hasAnyKeyword(text, ["TRUONG", "TRƯỜNG", "TRUNG TAM", "PHONG"])) {
+          paragraph.classList.add("admin-unit-line");
+        }
+      });
+    });
+  });
+}
+
+
 function paragraphLooksLikeMainAdministrativeTitle(text: string): boolean {
   const normalized = normalizeText(text);
   const compact = normalized.replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
@@ -239,8 +340,9 @@ export function enhanceAdministrativeDocumentHtml(
 
     if (isHeader) {
       // Bảng đầu văn bản hành chính thường chỉ là bảng kỹ thuật để căn 2 cột.
-      // Khi preview có thể hiện viền hỗ trợ kiểm tra, nhưng khi xuất Word phải ẩn viền.
+      // Mặc định ẩn viền trong preview và khi xuất Word; chỉ hiện nét đứt khi người dùng bật khung hỗ trợ.
       table.classList.add("admin-header-table");
+      markAdministrativeHeaderCellContent(table);
       if (options.preserveFirstFrame) {
         table.classList.add("admin-header-preview-frame");
       }
@@ -414,21 +516,53 @@ export function exportToWord(
           }
           .admin-header-table {
               margin-top: 0pt !important;
-              margin-bottom: 8pt !important;
+              margin-bottom: 12pt !important;
+              table-layout: fixed !important;
           }
+          .admin-header-table col.admin-left-col { width: 45% !important; }
+          .admin-header-table col.admin-right-col { width: 55% !important; }
           .admin-header-table p {
               text-align: center !important;
               text-indent: 0cm !important;
-              margin-bottom: 2pt !important;
+              margin-top: 0pt !important;
+              margin-bottom: 1pt !important;
               line-height: 115% !important;
+              font-family: "Times New Roman", serif !important;
+              font-size: 13pt !important;
           }
-          .admin-header-table td:first-child p,
-          .admin-header-table th:first-child p {
-              text-align: center !important;
+          .admin-header-table .admin-left-cell,
+          .admin-header-table .admin-right-cell { text-align: center !important; }
+          .admin-agency-line {
+              font-weight: normal !important;
+              text-transform: uppercase !important;
           }
-          .admin-header-table td:last-child p,
-          .admin-header-table th:last-child p {
+          .admin-unit-line {
+              font-weight: bold !important;
+              text-transform: uppercase !important;
+          }
+          .admin-number-line {
               text-align: center !important;
+              white-space: nowrap !important;
+              font-weight: normal !important;
+          }
+          .admin-national-line {
+              font-weight: bold !important;
+              text-transform: uppercase !important;
+              white-space: nowrap !important;
+              letter-spacing: -0.15pt !important;
+              font-size: 13pt !important;
+          }
+          .admin-motto-line {
+              font-weight: bold !important;
+              white-space: nowrap !important;
+              display: inline-block !important;
+              padding-bottom: 1pt !important;
+              border-bottom: 1pt solid #000 !important;
+          }
+          .admin-date-line {
+              text-align: center !important;
+              font-style: italic !important;
+              white-space: nowrap !important;
           }
           .signature-table td:first-child p { text-align: left !important; }
           .signature-table td:last-child p { text-align: center !important; }
