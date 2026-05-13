@@ -844,11 +844,16 @@ export default function App() {
                   .document-content .signature-table td,
                   .document-content .signature-table th {
                     border: none !important;
+                    background: transparent !important;
+                    background-color: transparent !important;
                   }
                   .document-content .admin-header-table {
                     margin-top: 0 !important;
                     margin-bottom: 12pt !important;
                     table-layout: fixed !important;
+                    width: 100% !important;
+                    border-collapse: collapse !important;
+                    background: transparent !important;
                   }
                   .document-content .admin-header-table col.admin-left-col { width: 42% !important; }
                   .document-content .admin-header-table col.admin-right-col { width: 58% !important; }
@@ -906,8 +911,8 @@ export default function App() {
                     font-weight: 700 !important;
                     text-transform: uppercase !important;
                     white-space: nowrap !important;
-                    letter-spacing: -0.15pt !important;
-                    font-size: 12.5pt !important;
+                    letter-spacing: -0.25pt !important;
+                    font-size: 12pt !important;
                   }
                   .document-content .admin-motto-line {
                     font-weight: 700 !important;
