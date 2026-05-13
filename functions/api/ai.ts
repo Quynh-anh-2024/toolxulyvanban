@@ -1,71 +1,67 @@
 export const onRequestPost = async (context: any) => {
   const { request, env } = context;
 
-  try {
-    const body = await request.json();
-    const { provider, prompt } = body;
-
-    const geminiKey = env.GEMINI_API_KEY;
-    const openRouterKey = env.OPENROUTER_API_KEY;
-
-    // Hàm bọc lỗi chuẩn JSON để web không bị Crash
-    const jsonError = (msg: string, status = 500) => {
-      return new Response(JSON.stringify({ error: msg }), { 
-        status, 
-        headers: { "Content-Type": "application/json" } 
-      });
-    };
-
-    if (provider === "gemini") {
-      if (!geminiKey) return jsonError("Thiếu GEMINI_API_KEY. Vui lòng kiểm tra lại tab Variables trên Cloudflare và nhấn Redeploy.");
-
-      // Cập nhật model Google chuẩn xác nhất hiện hành
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            safetySettings: [
-              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-            ],
-            generationConfig: { temperature: 0.25, maxOutputTokens: 8192 }
-          }),
-        }
-      );
-      const data = await response.text();
-      return new Response(data, { status: response.status, headers: { "Content-Type": "application/json" } });
-    } 
-    
-    else {
-      if (!openRouterKey) return jsonError("Thiếu OPENROUTER_API_KEY. Vui lòng kiểm tra lại tab Variables trên Cloudflare và nhấn Redeploy.");
-
-      // ÉP CỨNG MODEL: Dùng mô hình Gemini 2.0 Flash Lite Miễn phí và ổn định nhất của OpenRouter hiện nay (Tránh lỗi model cũ bị gỡ)
-      const stableModel = "google/gemini-2.0-flash-lite-preview-02-05:free";
-
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${openRouterKey}`,
-          "Content-Type": "application/json",
-          "X-Title": "Chuan hoa van ban TH Giang Chu Phin",
-        },
-        body: JSON.stringify({
-          model: stableModel,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.25,
-        }),
-      });
-      const data = await response.text();
-      return new Response(data, { status: response.status, headers: { "Content-Type": "application/json" } });
-    }
-  } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), { 
-      status: 500, headers: { "Content-Type": "application/json" } 
+  const json = (payload: Record<string, unknown>, status = 200) =>
+    new Response(JSON.stringify(payload), {
+      status,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
     });
+
+  try {
+    const body = await request.json().catch(() => ({}));
+    const prompt = String(body?.prompt || "").trim();
+
+    if (!prompt) return json({ error: "Thiếu nội dung để AI xử lý." }, 400);
+
+    // Chấp nhận cả 2 tên biến để không bắt bạn phải đổi lại biến đã nhập từ sáng.
+    const apiKey = String(env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY || "").trim();
+    const model = String(env.GEMINI_MODEL || env.VITE_GEMINI_MODEL || "gemini-3-flash-preview").trim();
+
+    if (!apiKey) {
+      return json(
+        {
+          error:
+            "Thiếu API Gemini trên Cloudflare. Hãy kiểm tra tab Variables: GEMINI_API_KEY hoặc VITE_GEMINI_API_KEY, sau đó Redeploy.",
+        },
+        500
+      );
+    }
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+    const geminiResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.25,
+          topP: 0.9,
+          maxOutputTokens: 8192,
+        },
+      }),
+    });
+
+    const data: any = await geminiResponse.json().catch(() => null);
+
+    if (!geminiResponse.ok) {
+      const message = data?.error?.message || `Gemini API lỗi ${geminiResponse.status}.`;
+      return json({ error: message, model }, geminiResponse.status);
+    }
+
+    const text =
+      data?.candidates?.[0]?.content?.parts
+        ?.map((part: { text?: string }) => part.text || "")
+        .join("\n")
+        .trim() || "";
+
+    return json({ text, model });
+  } catch (error: any) {
+    return json({ error: error?.message || "Lỗi máy chủ AI." }, 500);
   }
 };
