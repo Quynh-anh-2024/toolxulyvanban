@@ -4,48 +4,36 @@ export async function runAI(prompt: string): Promise<string> {
     throw new Error("Nội dung gửi AI đang trống.");
   }
 
-  // Ép hệ thống dùng OpenRouter vì chúng ta đã khai báo khóa trên Cloudflare
-  const response = await fetch("/api/ai", {
+  // Thay vì gọi "/api/ai" dễ bị 404 nếu cài đặt Cloudflare sai, 
+  // chúng ta gọi THẲNG sang OpenRouter luôn. 
+  // Bạn CẦN thay chữ "sk-or-v1..." bên dưới bằng KEY THỰC TẾ CỦA BẠN.
+  const apiKey = "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"; // <- Thay API Key của bạn vào đây!
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider: "openrouter", prompt: trimmedPrompt }), 
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "X-Title": "Chuan hoa van ban TH Giang Chu Phin",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.0-flash-lite-preview-02-05:free", // Model mạnh và miễn phí
+      messages: [{ role: "user", content: trimmedPrompt }],
+      temperature: 0.25,
+    }),
   });
 
-  const rawText = await response.text();
-  let data: any = null;
-  try {
-    data = rawText ? JSON.parse(rawText) : null;
-  } catch {
-    data = null;
-  }
+  const data = await response.json().catch(() => null);
 
-  if (!response.ok) {
-    const message =
-      data?.error ||
-      data?.message ||
-      rawText ||
-      `Máy chủ AI trả về lỗi ${response.status}.`;
+  if (!response.ok || data?.error) {
+    const message = data?.error?.message || `Lỗi từ OpenRouter (${response.status}).`;
     throw new Error(message);
   }
 
-  if (typeof data?.text === "string" && data.text.trim()) {
-    return data.text.trim();
+  const text = data?.choices?.[0]?.message?.content?.trim();
+  if (!text) {
+    throw new Error("AI không phản hồi nội dung. Vui lòng thử lại.");
   }
 
-  const geminiText = data?.candidates?.[0]?.content?.parts
-    ?.map((part: { text?: string }) => part.text || "")
-    .join("\n")
-    .trim();
-
-  if (geminiText) return geminiText;
-
-  // Bổ sung lệnh trích xuất kết quả chuẩn của OpenRouter
-  const openRouterText = data?.choices?.[0]?.message?.content;
-  if (openRouterText) return openRouterText.trim();
-
-  if (typeof rawText === "string" && rawText.trim()) {
-    return rawText.trim();
-  }
-
-  throw new Error("AI không trả về nội dung. Vui lòng thử lại với văn bản ngắn hơn.");
+  return text;
 }
