@@ -367,8 +367,8 @@ export default function App() {
                   <option value="edu">Chuẩn hóa Giáo dục (Sư phạm)</option>
                 </select>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <label className="flex items-center gap-2 border rounded p-2"><input type="radio" checked={aiMode === "suggest"} onChange={() => setAiMode("suggest")} /> Chỉ báo lỗi</label>
-                  <label className="flex items-center gap-2 border rounded p-2"><input type="radio" checked={aiMode === "autofix"} onChange={() => setAiMode("autofix")} /> AI tự sửa</label>
+                  <label className="flex items-center gap-2 border rounded p-2 cursor-pointer"><input type="radio" checked={aiMode === "suggest"} onChange={() => setAiMode("suggest")} className="cursor-pointer" /> Chỉ báo lỗi</label>
+                  <label className="flex items-center gap-2 border rounded p-2 cursor-pointer"><input type="radio" checked={aiMode === "autofix"} onChange={() => setAiMode("autofix")} className="cursor-pointer" /> AI tự sửa</label>
                 </div>
                 <button onClick={() => handleAITask("proofread")} disabled={isAILoading} className="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-medium py-2.5 rounded text-sm flex justify-center items-center gap-2 transition-colors">
                   {isAILoading && activeTask === "proofread" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
@@ -422,10 +422,12 @@ export default function App() {
                     margin-top: 0pt;
                     margin-bottom: ${config.paraSpacing}pt;
                   }
+
+                  /* --- LỚP BẢO VỆ CHỐNG ĐÈ CHỮ (SỬA LỖI NĐ 30) --- */
                   .document-content table {
-                    width: 100%;
-                    max-width: 100%;
-                    table-layout: fixed;
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    table-layout: fixed !important; /* Bắt buộc khóa khung cột */
                     border-collapse: collapse;
                     margin-top: 6pt;
                     margin-bottom: 12pt;
@@ -436,8 +438,9 @@ export default function App() {
                     border: 1px solid #000;
                     padding: 4pt;
                     vertical-align: top;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
+                    word-wrap: break-word !important;
+                    word-break: break-word !important; /* Tự động ngắt dòng nếu chữ quá dài */
+                    overflow-wrap: break-word !important;
                   }
                   .document-content table p,
                   .document-content td p,
@@ -446,6 +449,8 @@ export default function App() {
                     margin: 0 0 3pt 0 !important;
                     line-height: 1.15 !important;
                   }
+
+                  /* CSS Gốc của bạn (Giữ nguyên) */
                   .document-content .admin-header-table {
                     width: calc(100% + 16px) !important;
                     margin-left: -8px !important;
@@ -456,8 +461,8 @@ export default function App() {
                     table-layout: fixed !important;
                     background: transparent !important;
                   }
-                  .document-content .admin-header-table col.admin-left-col { width: 36% !important; }
-                  .document-content .admin-header-table col.admin-right-col { width: 64% !important; }
+                  .document-content .admin-header-table col.admin-left-col { width: 40% !important; } /* NĐ30 thường trái 40, phải 60 */
+                  .document-content .admin-header-table col.admin-right-col { width: 60% !important; }
                   .document-content .admin-header-table td,
                   .document-content .admin-header-table th {
                     border: none !important;
@@ -465,8 +470,26 @@ export default function App() {
                     padding: 0pt 3pt !important;
                     text-align: center !important;
                     vertical-align: top !important;
-                    overflow: visible !important;
+                    overflow: hidden !important; /* Khóa không cho tràn ra ngoài */
                   }
+                  
+                  /* Nếu bảng Quốc hiệu không được gán class admin-header-table, dùng thẻ an toàn này */
+                  .document-content table:first-of-type:not(.admin-header-table) td {
+                    width: 50% !important;
+                    border: none !important;
+                  }
+                  .document-content table:first-of-type:not(.admin-header-table) td p {
+                    text-align: center !important;
+                    margin-bottom: 2pt !important;
+                  }
+                  .document-content table:last-of-type:not(.admin-header-table) td {
+                    width: 50% !important;
+                    border: none !important;
+                  }
+                  .document-content table:last-of-type:not(.admin-header-table) td:last-child p {
+                    text-align: center !important;
+                  }
+
                   .document-content .admin-header-preview-frame td {
                     border: 1px dashed #94a3b8 !important;
                   }
@@ -476,14 +499,13 @@ export default function App() {
                     text-indent: 0cm !important;
                     margin: 0 0 2pt 0 !important;
                     line-height: 1.12 !important;
-                    white-space: nowrap;
-                    overflow: visible;
+                    white-space: normal !important; /* Đổi thành normal để cho phép rớt dòng */
                   }
                   .document-content .admin-agency-line { font-size: 12pt !important; font-weight: normal !important; text-transform: uppercase; }
                   .document-content .admin-unit-line { font-size: 12.5pt !important; font-weight: bold !important; text-transform: uppercase; }
                   .document-content .admin-number-line { font-size: 12pt !important; font-weight: normal !important; }
-                  .document-content .admin-national-line { font-size: 10.8pt !important; font-weight: bold !important; letter-spacing: -0.25pt; text-transform: uppercase; }
-                  .document-content .admin-motto-line { font-size: 12pt !important; font-weight: bold !important; display: inline-block; border-bottom: 1px solid #000; padding-bottom: 1pt; }
+                  .document-content .admin-national-line { font-size: 12pt !important; font-weight: bold !important; letter-spacing: -0.25pt; text-transform: uppercase; }
+                  .document-content .admin-motto-line { font-size: 13pt !important; font-weight: bold !important; display: inline-block; border-bottom: 1px solid #000; padding-bottom: 1pt; }
                   .document-content .admin-date-line { font-size: 12pt !important; font-style: italic; }
                   .document-content .doc-main-title {
                     text-align: center !important;
