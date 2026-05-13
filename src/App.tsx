@@ -40,7 +40,7 @@ export default function App() {
 
   // Document safety / administrative formatting state
   const [processingMode, setProcessingMode] = useState<DocumentProcessingMode>("preserve");
-  const [preserveFirstFrame, setPreserveFirstFrame] = useState(true);
+  const [preserveFirstFrame, setPreserveFirstFrame] = useState(false);
   const [docStats, setDocStats] = useState<DocumentStats>({
     tableCount: 0,
     imageCount: 0,
@@ -847,30 +847,67 @@ export default function App() {
                   }
                   .document-content .admin-header-table {
                     margin-top: 0 !important;
-                    margin-bottom: 10pt !important;
+                    margin-bottom: 12pt !important;
+                    table-layout: fixed !important;
                   }
+                  .document-content .admin-header-table col.admin-left-col { width: 45% !important; }
+                  .document-content .admin-header-table col.admin-right-col { width: 55% !important; }
                   .document-content .admin-header-preview-frame,
                   .document-content .admin-header-preview-frame td,
                   .document-content .admin-header-preview-frame th {
-                    border: 1px dashed #94a3b8 !important;
+                    border: 1px dashed #cbd5e1 !important;
                   }
                   .document-content .admin-header-table td,
                   .document-content .admin-header-table th,
                   .document-content .signature-table td,
                   .document-content .signature-table th {
-                    padding: 2pt 5pt !important;
+                    padding: 0pt 4pt !important;
+                    vertical-align: top !important;
                   }
                   .document-content .admin-header-table p {
                     text-align: center !important;
                     text-indent: 0cm !important;
-                    margin-bottom: 2pt !important;
+                    margin-top: 0pt !important;
+                    margin-bottom: 1pt !important;
                     line-height: 1.15 !important;
+                    font-family: "Times New Roman", serif !important;
+                    font-size: 13pt !important;
                   }
-                  .document-content .admin-header-table td:first-child p,
-                  .document-content .admin-header-table th:first-child p,
-                  .document-content .admin-header-table td:last-child p,
-                  .document-content .admin-header-table th:last-child p {
+                  .document-content .admin-header-table .admin-left-cell,
+                  .document-content .admin-header-table .admin-right-cell {
                     text-align: center !important;
+                  }
+                  .document-content .admin-agency-line {
+                    font-weight: 400 !important;
+                    text-transform: uppercase !important;
+                  }
+                  .document-content .admin-unit-line {
+                    font-weight: 700 !important;
+                    text-transform: uppercase !important;
+                  }
+                  .document-content .admin-number-line {
+                    text-align: center !important;
+                    font-weight: 400 !important;
+                    white-space: nowrap !important;
+                  }
+                  .document-content .admin-national-line {
+                    font-weight: 700 !important;
+                    text-transform: uppercase !important;
+                    white-space: nowrap !important;
+                    letter-spacing: -0.15pt !important;
+                    font-size: 13pt !important;
+                  }
+                  .document-content .admin-motto-line {
+                    font-weight: 700 !important;
+                    white-space: nowrap !important;
+                    display: inline-block !important;
+                    padding-bottom: 1pt !important;
+                    border-bottom: 1px solid #000 !important;
+                  }
+                  .document-content .admin-date-line {
+                    text-align: center !important;
+                    font-style: italic !important;
+                    white-space: nowrap !important;
                   }
                   .document-content .doc-main-title {
                     text-align: center !important;
