@@ -25,3 +25,11 @@ declare module 'mammoth' {
 
   export const images: any;
 }
+
+interface ImportMetaEnv {
+  readonly VITE_OPENROUTER_API_KEY?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}

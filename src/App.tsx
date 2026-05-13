@@ -12,14 +12,21 @@ import {
   AlignLeft,
   Loader2,
   CheckCircle2,
+  AlertTriangle,
+  ShieldCheck,
+  Table2,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { cn } from "./lib/utils";
 import { runAI } from "./services/ai";
 import {
   FormattingConfig,
+  DocumentProcessingMode,
+  DocumentStats,
   exportToWord,
   processHtmlToRemoveBullets,
+  enhanceAdministrativeDocumentHtml,
 } from "./utils/docx";
 
 export default function App() {
@@ -27,8 +34,21 @@ export default function App() {
   const [fileName, setFileName] = useState("Tai_Lieu");
   const [fileStatus, setFileStatus] = useState("Chưa có file nào");
   const [rawText, setRawText] = useState("");
+  const [sourceHtml, setSourceHtml] = useState("");
   const [docHtml, setDocHtml] = useState("");
   const [hasFile, setHasFile] = useState(false);
+
+  // Document safety / administrative formatting state
+  const [processingMode, setProcessingMode] = useState<DocumentProcessingMode>("preserve");
+  const [preserveFirstFrame, setPreserveFirstFrame] = useState(true);
+  const [docStats, setDocStats] = useState<DocumentStats>({
+    tableCount: 0,
+    imageCount: 0,
+    firstTableHasBorderRisk: false,
+    administrativeHeaderDetected: false,
+    signatureTableDetected: false,
+    warningMessages: [],
+  });
 
   // Formatting State
   const [config, setConfig] = useState<FormattingConfig>({
@@ -53,6 +73,30 @@ export default function App() {
   const [aiStyle, setAiStyle] = useState("edu");
 
   const previewRef = useRef<HTMLDivElement>(null);
+
+
+  const rebuildDocumentHtml = (
+    html: string,
+    mode: DocumentProcessingMode = processingMode,
+    keepFirstFrame: boolean = preserveFirstFrame
+  ) => {
+    const enhanced = enhanceAdministrativeDocumentHtml(html, {
+      mode,
+      preserveFirstFrame: keepFirstFrame,
+    });
+    setDocHtml(enhanced.html);
+    setDocStats(enhanced.stats);
+  };
+
+  const handleProcessingModeChange = (mode: DocumentProcessingMode) => {
+    setProcessingMode(mode);
+    if (sourceHtml) rebuildDocumentHtml(sourceHtml, mode, preserveFirstFrame);
+  };
+
+  const handlePreserveFirstFrameChange = (checked: boolean) => {
+    setPreserveFirstFrame(checked);
+    if (sourceHtml) rebuildDocumentHtml(sourceHtml, processingMode, checked);
+  };
 
   // Handle File Upload
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -84,7 +128,14 @@ export default function App() {
 
         // Process and set HTML
         const processedHtml = processHtmlToRemoveBullets(result.value);
-        setDocHtml(processedHtml);
+        setSourceHtml(processedHtml);
+
+        const enhanced = enhanceAdministrativeDocumentHtml(processedHtml, {
+          mode: processingMode,
+          preserveFirstFrame,
+        });
+        setDocHtml(enhanced.html);
+        setDocStats(enhanced.stats);
         setHasFile(true);
         setFileStatus(`Đã tải: ${file.name}`);
       } catch (err) {
@@ -258,7 +309,105 @@ export default function App() {
               </div>
             </section>
 
-            {/* 2. Formatting Config */}
+            {/* 2. Safe document processing */}
+            <section
+              className={cn(
+                "bg-white p-5 rounded-xl shadow-sm border border-slate-200 transition-opacity",
+                !hasFile && "opacity-50 pointer-events-none"
+              )}
+            >
+              <h2 className="text-lg font-semibold mb-4 text-slate-800 flex items-center gap-2">
+                <SlidersHorizontal className="w-5 h-5 text-blue-700" />
+                <span>2️⃣</span> Chế Độ Giữ Khung/Bảng
+              </h2>
+
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-slate-700">
+                  Kiểu xử lý sau khi upload
+                </label>
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+                    <input
+                      type="radio"
+                      value="preserve"
+                      checked={processingMode === "preserve"}
+                      onChange={() => handleProcessingModeChange("preserve")}
+                      className="mt-1"
+                    />
+                    <span>
+                      <b>Giữ nguyên định dạng gốc tối đa</b>
+                      <br />
+                      <span className="text-xs text-slate-500">Ưu tiên giữ khung/bảng, phù hợp công văn, đơn, biên bản, biểu mẫu.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+                    <input
+                      type="radio"
+                      value="nd30"
+                      checked={processingMode === "nd30"}
+                      onChange={() => handleProcessingModeChange("nd30")}
+                      className="mt-1"
+                    />
+                    <span>
+                      <b>Chuẩn hóa theo NĐ 30</b>
+                      <br />
+                      <span className="text-xs text-slate-500">Chỉ bỏ viền khi nhận diện đúng phần thể thức/chữ ký.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+                    <input
+                      type="radio"
+                      value="textOnly"
+                      checked={processingMode === "textOnly"}
+                      onChange={() => handleProcessingModeChange("textOnly")}
+                      className="mt-1"
+                    />
+                    <span>
+                      <b>Chỉ lấy nội dung để AI soát lỗi</b>
+                      <br />
+                      <span className="text-xs text-slate-500">Không cố chuẩn hóa bố cục, dùng khi tài liệu quá phức tạp.</span>
+                    </span>
+                  </label>
+                </div>
+
+                <label className="flex items-center gap-2 text-sm bg-amber-50 border border-amber-200 rounded-lg p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={preserveFirstFrame}
+                    onChange={(e) => handlePreserveFirstFrameChange(e.target.checked)}
+                  />
+                  <span>
+                    <b>Giữ nguyên khung/bảng đầu văn bản</b>
+                    <br />
+                    <span className="text-xs text-amber-700">Khuyến nghị bật khi văn bản hành chính có ô/kẻ khung ở phần đầu.</span>
+                  </span>
+                </label>
+
+                <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm">
+                  <div className="flex items-center gap-2 font-semibold text-slate-700 mb-2">
+                    <Table2 className="w-4 h-4" /> Kiểm tra nhanh tài liệu
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+                    <span>Số bảng/khung: <b>{docStats.tableCount}</b></span>
+                    <span>Số hình ảnh: <b>{docStats.imageCount}</b></span>
+                    <span>Thể thức hành chính: <b>{docStats.administrativeHeaderDetected ? "Có" : "Chưa rõ"}</b></span>
+                    <span>Khối chữ ký/nơi nhận: <b>{docStats.signatureTableDetected ? "Có" : "Chưa rõ"}</b></span>
+                  </div>
+                  {docStats.warningMessages.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {docStats.warningMessages.map((message, index) => (
+                        <p key={index} className="flex items-start gap-2 text-xs text-amber-700">
+                          <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+                          <span>{message}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* 3. Formatting Config */}
             <section
               className={cn(
                 "bg-white p-5 rounded-xl shadow-sm border border-slate-200 transition-opacity",
@@ -267,7 +416,7 @@ export default function App() {
             >
               <h2 className="text-lg font-semibold mb-4 text-slate-800 flex items-center gap-2">
                 <Settings className="w-5 h-5 text-slate-700" />
-                <span>2️⃣</span> Căn Lề NĐ 30
+                <span>3️⃣</span> Căn Lề NĐ 30
               </h2>
 
               <div className="space-y-4">
@@ -426,7 +575,7 @@ export default function App() {
               )}
             >
               <h2 className="text-lg font-semibold mb-3 text-indigo-800 flex items-center gap-2">
-                <Wand2 className="w-5 h-5" /> <span>3️⃣ Soát Lỗi & Biên Tập AI</span>
+                <Wand2 className="w-5 h-5" /> <span>4️⃣ Soát Lỗi & Biên Tập AI</span>
               </h2>
 
               <div className="space-y-4">
@@ -567,7 +716,7 @@ export default function App() {
               )}
             >
               <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                <span className="text-xl">💾</span> 4️⃣ Hoàn Tất
+                <span className="text-xl">💾</span> 5️⃣ Hoàn Tất
               </h2>
               <button
                 onClick={() => exportToWord(previewRef.current, fileName, config)}
@@ -585,9 +734,14 @@ export default function App() {
           {/* RIGHT COLUMN: PREVIEW */}
           <section className="lg:col-span-8 flex flex-col">
             <div className="flex justify-between items-end mb-4">
-              <h2 className="text-xl font-bold text-slate-800">
-                Bản Xem Trước (A4)
-              </h2>
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">
+                  Bản Xem Trước (A4)
+                </h2>
+                <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
+                  <ShieldCheck className="w-3 h-3" /> Đã tắt cơ chế tự xóa viền bảng đầu/cuối; bảng được xử lý theo nhận diện an toàn.
+                </p>
+              </div>
             </div>
 
             <div className="bg-slate-300 p-4 md:p-8 rounded-xl flex justify-center overflow-auto flex-1 h-[800px]">
@@ -652,14 +806,16 @@ export default function App() {
                   }
                   
                   /* ========================================= */
-                  /* SỬA LỖI BẢNG (TABLE) TRONG GIÁO ÁN / NĐ 30 */
+                  /* BẢNG / KHUNG VĂN BẢN HÀNH CHÍNH */
+                  /* Không xóa viền bằng table:first-of-type / last-of-type. */
+                  /* Chỉ xử lý theo class đã nhận diện trong utils/docx.ts. */
                   /* ========================================= */
 
-                  /* BẢNG CHUNG: Ép bảng nằm trọn trong trang, không tràn viền */
                   .document-content table { 
                     width: 100%; 
                     max-width: 100%;
                     box-sizing: border-box;
+                    table-layout: fixed;
                     border-collapse: collapse; 
                     margin-top: 6pt;
                     margin-bottom: 12pt; 
@@ -668,49 +824,50 @@ export default function App() {
                     border: 1px solid #000; 
                     padding: 0.5rem; 
                     text-align: left !important; 
+                    vertical-align: top;
+                    word-break: normal;
+                    overflow-wrap: break-word;
                   }
 
-                  /* Xóa thụt lề cho chữ nằm BÊN TRONG bảng */
-                  .document-content table p, .document-content td p, .document-content th p {
+                  .document-content table p,
+                  .document-content td p,
+                  .document-content th p {
                     text-indent: 0cm !important;
                     margin-bottom: 0pt !important;
-                  }
-                  
-                  /* BẢNG ĐẦU TIÊN (Quốc hiệu - Tiêu ngữ) */
-                  .document-content table:first-of-type,
-                  .document-content table:first-of-type td,
-                  .document-content table:first-of-type th {
-                    border: none !important; 
-                    padding: 0 !important;
-                  }
-                  .document-content table:first-of-type td p,
-                  .document-content table:first-of-type th p {
-                    text-align: center !important; 
-                    margin-bottom: 2pt !important; 
-                  }
-                  .document-content table:first-of-type tr:first-child td p {
-                     font-weight: bold; 
+                    line-height: 1.15 !important;
                   }
 
-                  /* BẢNG CUỐI CÙNG (Nơi nhận - Chữ ký) */
-                  .document-content table:last-of-type,
-                  .document-content table:last-of-type td,
-                  .document-content table:last-of-type th {
-                    border: none !important; 
-                    padding: 0 !important;
+                  .document-content .admin-header-table,
+                  .document-content .admin-header-table td,
+                  .document-content .admin-header-table th,
+                  .document-content .signature-table,
+                  .document-content .signature-table td,
+                  .document-content .signature-table th {
+                    border: none !important;
                   }
-                  .document-content table:last-of-type td:first-child p {
+                  .document-content .admin-header-table td,
+                  .document-content .admin-header-table th,
+                  .document-content .signature-table td,
+                  .document-content .signature-table th {
+                    padding: 0 2pt !important;
+                  }
+                  .document-content .admin-header-table p {
+                    text-align: center !important;
+                    margin-bottom: 2pt !important;
+                  }
+                  .document-content .signature-table td:first-child p {
                     text-align: left !important;
                   }
-                  .document-content table:last-of-type td:first-child p:first-child {
-                    font-weight: bold;
-                    font-style: italic; 
+                  .document-content .signature-table td:last-child p {
+                    text-align: center !important;
                   }
-                  .document-content table:last-of-type td:last-child p {
-                    text-align: center !important; 
-                  }
-                  .document-content table:last-of-type td:last-child p:first-child {
-                    font-weight: bold; 
+                  .document-content .preserved-frame-table,
+                  .document-content .preserved-frame-table td,
+                  .document-content .preserved-frame-table th,
+                  .document-content .form-frame-table,
+                  .document-content .form-frame-table td,
+                  .document-content .form-frame-table th {
+                    border: 1px solid #000 !important;
                   }
 
                   /* Giữ tỷ lệ ảnh */
