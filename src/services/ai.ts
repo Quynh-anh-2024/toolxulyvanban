@@ -1,34 +1,46 @@
-export type AIProvider = "gemini";
-
-function extractGeminiText(data: any): string {
-  return (
-    data?.candidates?.[0]?.content?.parts
-      ?.map((part: { text?: string }) => part.text || "")
-      .join("\n")
-      .trim() || ""
-  );
-}
-
 export async function runAI(prompt: string): Promise<string> {
+  const trimmedPrompt = prompt.trim();
+  if (!trimmedPrompt) {
+    throw new Error("Nội dung gửi AI đang trống.");
+  }
+
   const response = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider: "gemini", prompt }),
+    body: JSON.stringify({ prompt: trimmedPrompt }),
   });
 
-  const data = await response.json().catch(() => null);
+  const rawText = await response.text();
+  let data: any = null;
+  try {
+    data = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    data = null;
+  }
 
   if (!response.ok) {
-    throw new Error(
+    const message =
       data?.error ||
-        `Máy chủ AI lỗi ${response.status}. Vui lòng kiểm tra biến GEMINI_API_KEY/VITE_GEMINI_API_KEY trên Cloudflare và Redeploy.`
-    );
+      data?.message ||
+      rawText ||
+      `Máy chủ AI trả về lỗi ${response.status}.`;
+    throw new Error(message);
   }
 
-  const text = data?.text || extractGeminiText(data);
-  if (!text) {
-    throw new Error("Gemini không trả về nội dung. Vui lòng thử lại hoặc rút ngắn văn bản.");
+  if (typeof data?.text === "string" && data.text.trim()) {
+    return data.text.trim();
   }
 
-  return text;
+  const geminiText = data?.candidates?.[0]?.content?.parts
+    ?.map((part: { text?: string }) => part.text || "")
+    .join("\n")
+    .trim();
+
+  if (geminiText) return geminiText;
+
+  if (typeof rawText === "string" && rawText.trim()) {
+    return rawText.trim();
+  }
+
+  throw new Error("AI không trả về nội dung. Vui lòng thử lại với văn bản ngắn hơn.");
 }
