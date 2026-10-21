@@ -119,20 +119,74 @@ export function cleanPdfText(value: string): string {
  * thay vì tin lớp chữ, nếu không file Word xuất ra sẽ lỗi ký tự hàng loạt.
  */
 export function pageTextLooksGarbled(items: PdfTextItem[]): { garbled: boolean; reason: string } {
-  const full = items.map((it) => it.text).join("");
-  const chars = full.replace(/\s/g, "").length;
+  // CHỈ xét các mẩu chữ có nội dung, nối bằng 1 khoảng trắng: pdf.js chèn rất
+  // nhiều item chỉ gồm khoảng trắng để tách các mẩu chữ ở xa nhau. Nếu tính
+  // cả chúng, token bị vỡ vụn giả tạo — một bảng điểm bình thường (hầu hết ô
+  // chỉ có 1 ký tự: Đ, T, số...) sẽ bị tưởng là "chữ vỡ từng ký tự" và bị
+  // OCR oan. (Lỗi thật 21/10/2026: bảng tổng hợp kết quả đánh giá in từ hệ
+  // thống trường học, lớp chữ hoàn hảo nhưng app OCR ra rác.)
+  const meaningful = items.filter((it) => it.text.trim().length > 0);
+  const full = meaningful.map((it) => it.text).join(" ");
+  const compact = full.replace(/\s/g, "");
+  const chars = compact.length;
   if (chars < 80) return { garbled: false, reason: "" };
 
+  // Dạng 1: ký tự vùng riêng/thay thế/điều khiển — font lỗi mã hoá trầm trọng.
   const suspicious = (full.match(/[\uE000-\uF8FF\uFFFD\u0000-\u0008\u000B-\u001F\u007F]/g) || []).length;
   if (suspicious / chars > 0.02) {
     return { garbled: true, reason: `khoảng ${Math.round((suspicious / chars) * 100)}% ký tự lạ (lỗi font/mã hoá)` };
   }
 
+  // Tỉ lệ chữ cái còn dấu tiếng Việt — bằng chứng phụ cho dạng 2 và 3:
+  // font lỗi thật làm dấu biến mất gần hết, còn văn bản xịn (kể cả bảng
+  // điểm) luôn giữ dấu ở tiêu đề, họ tên, ghi chú.
+  const letters = (compact.match(/[A-Za-zÀ-ỹ]/g) || []).length;
+  const marked =
+    (compact.match(/[ăâđêôơưĂÂĐÊÔƠƯ\u00C0-\u00FF\u1EA0-\u1EF9]/g) || []).length +
+    (compact.match(/[\u0300-\u036F]/g) || []).length;
+  const markedRatio = letters > 0 ? marked / letters : 0;
+
   const tokens = full.split(/\s+/).filter(Boolean);
-  if (tokens.length > 120) {
+  // Dạng 2: chữ bị tách rời từng ký tự (lỗi giãn chữ trong PDF). Chỉ kết
+  // luận khi KÈM bằng chứng mất dấu: bảng biểu nhiều ô 1 ký tự nhưng còn
+  // nguyên dấu tiếng Việt thì KHÔNG phải lỗi font.
+  if (tokens.length > 120 && letters > 300 && markedRatio < 0.03) {
     const singleChar = tokens.filter((t) => t.replace(/[.,;:]/g, "").length === 1).length;
     if (singleChar / tokens.length > 0.45) {
-      return { garbled: true, reason: "chữ bị tách rời từng ký tự (lỗi giãn chữ trong PDF)" };
+      return { garbled: true, reason: "chữ bị tách rời từng ký tự và mất gần hết dấu tiếng Việt (lỗi giãn chữ/font trong PDF)" };
+    }
+  }
+
+  // Dạng 3: font nhúng SAI ÁNH XẠ (hay gặp ở PDF in từ hệ thống quản lý
+  // trường học): ký tự vẫn là Unicode "hợp lệ" nên lọt hai lưới trên, nhưng
+  // dấu tiếng Việt biến thành ký hiệu lạ (| £ « » ~ { }...) hoặc mất hẳn,
+  // các ô bảng dính thành cụm ký tự vô nghĩa. Ba tín hiệu độc lập:
+  const pipes = (compact.match(/\|/g) || []).length;
+  if (pipes >= 8 && pipes / chars > 0.01) {
+    return { garbled: true, reason: "xuất hiện dày đặc ký tự lạ dạng '|' (lỗi font nhúng, sai ánh xạ ký tự)" };
+  }
+  const hardSymbols = (compact.match(/[£¤¦¨¯´¸«»~^`{[\]\\<>@#§¶×]/g) || []).length;
+  if (hardSymbols / chars > 0.05) {
+    return { garbled: true, reason: `khoảng ${Math.round((hardSymbols / chars) * 100)}% ký hiệu lạ (lỗi font nhúng, sai ánh xạ ký tự)` };
+  }
+  // Cụm dài chứa nhiều ký hiệu (ô bảng bị dính, vd "|291120559).|H|"):
+  if (tokens.length > 60) {
+    const glued = tokens.filter(
+      (t) => t.length >= 8 && (t.match(/[|£«»~^`{[\]\\<>#@]/g) || []).length >= 4
+    ).length;
+    if (glued / tokens.length > 0.03) {
+      return { garbled: true, reason: "nhiều cụm ký tự vô nghĩa dính liền nhau (lỗi font nhúng, sai ánh xạ ký tự)" };
+    }
+  }
+  // Trang nhiều chữ cái mà gần như KHÔNG có dấu tiếng Việt nào, đồng thời
+  // mật độ ký hiệu cao → dấu đã bị ánh xạ sai gần hết.
+  if (letters > 300 && markedRatio < 0.03) {
+    const commonPunct = ".,;:!?()'\"/%°-–—";
+    const symbolChars = [...compact].filter(
+      (c) => !/[A-Za-zÀ-ỹ0-9]/.test(c) && !commonPunct.includes(c)
+    ).length;
+    if (symbolChars / chars > 0.06) {
+      return { garbled: true, reason: "gần như không còn dấu tiếng Việt nhưng dày đặc ký hiệu lạ (lỗi font nhúng, sai ánh xạ ký tự)" };
     }
   }
   return { garbled: false, reason: "" };
