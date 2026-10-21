@@ -1,13 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <title>Chuẩn Hóa Văn Bản &amp; Soát Lỗi AI</title>
+    <meta
+      name="description"
+      content="Chuẩn hoá văn bản theo thể thức NĐ 30, chuyển PDF/Excel sang Word chuẩn định dạng, soát lỗi chính tả bằng AI."
+    />
+    <!-- PWA: cài ra màn hình chính, chạy được cả khi không có mạng -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1e40af" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Xử Lý Văn Bản" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

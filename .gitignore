@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# File cache do tesseract.js (Node) tải về khi chạy test
+/*.traineddata
+tests/real/
