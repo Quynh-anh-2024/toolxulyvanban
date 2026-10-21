@@ -79,6 +79,16 @@ def main() -> int:
             "() => document.body.innerText.includes('Trang OCR: 3')",
             timeout=300000,
         )
+        # Khung thông tin trang hiện trước, nội dung xem trước render ngay
+        # sau — chờ chữ OCR xuất hiện thật trong DOM rồi mới kiểm, tránh
+        # đọc phải bản xem trước chưa kịp vẽ (đua thời gian render).
+        try:
+            page.wait_for_function(
+                "() => document.body.innerText.includes('Nghị quyết')",
+                timeout=60000,
+            )
+        except Exception:
+            pass
         text = body_text(page)
         check("App nhận diện đúng là bản scan (3 trang OCR)", True)
         check("OCR đọc được 'BỘ GIÁO DỤC' ở phần đầu", "BỘ GIÁO DỤC" in text)
