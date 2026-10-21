@@ -29,6 +29,12 @@ declare module 'mammoth' {
 interface ImportMetaEnv {
   readonly VITE_OPENROUTER_API_KEY?: string;
   readonly VITE_GEMINI_API_KEY?: string;
+  // Biến chuẩn của Vite (dùng cho đăng ký service worker PWA ở main.tsx)
+  readonly BASE_URL: string;
+  readonly MODE: string;
+  readonly DEV: boolean;
+  readonly PROD: boolean;
+  readonly SSR: boolean;
 }
 
 interface ImportMeta {

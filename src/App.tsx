@@ -17,6 +17,12 @@ import {
 
 import { cn } from "./lib/utils";
 import { runAI } from "./services/ai";
+import { convertPdfFile, type PdfConvertResult } from "./services/pdf";
+import { convertExcelFile } from "./services/excel";
+import { exportBlocksTablesToExcel } from "./services/excel";
+import { exportBlocksToWord } from "./utils/docxExport";
+import { blocksToTables, type SheetInfo } from "./utils/spreadsheet";
+import type { DocBlock, PdfClassification } from "./utils/pdfStructure";
 import {
   DocumentProcessingMode,
   DocumentStats,
@@ -71,6 +77,18 @@ export default function App() {
   const [showPreviewFrame, setShowPreviewFrame] = useState(false);
   const [documentStats, setDocumentStats] = useState<DocumentStats>(EMPTY_STATS);
 
+  // --- Trạng thái riêng cho luồng PDF/Excel → Word ---
+  // structuredBlocks: mô hình khối của tài liệu nạp từ PDF hoặc Excel — nguồn
+  // để xuất .docx thật (luồng .docx cũ vẫn xuất qua HTML như trước).
+  const [structuredBlocks, setStructuredBlocks] = useState<DocBlock[] | null>(null);
+  const [pdfInfo, setPdfInfo] = useState<PdfClassification | null>(null);
+  const [pdfWarnings, setPdfWarnings] = useState<string[]>([]);
+  const [pdfOcrConfidence, setPdfOcrConfidence] = useState<number | undefined>(undefined);
+  const [excelSheets, setExcelSheets] = useState<SheetInfo[] | null>(null);
+  const [excelWarnings, setExcelWarnings] = useState<string[]>([]);
+  const [isConvertingPdf, setIsConvertingPdf] = useState(false);
+  const [convertProgress, setConvertProgress] = useState("");
+
   const [config, setConfig] = useState<FormattingConfig>({
     font: "Times New Roman",
     size: 14,
@@ -108,17 +126,109 @@ export default function App() {
     setDocumentStats(stats);
   }, [sourceHtml, processingMode, showPreviewFrame]);
 
+  const extractedTableCount = useMemo(
+    () => (structuredBlocks ? blocksToTables(structuredBlocks).length : 0),
+    [structuredBlocks]
+  );
+
   const modeSummary = useMemo(() => {
     if (processingMode === "nd30") return "Ẩn khung kỹ thuật khi xuất Word, căn lại tiêu đề.";
     if (processingMode === "textOnly") return "Chỉ dùng nội dung chữ cho AI.";
     return "Giữ định dạng gốc tối đa, không xóa viền bảng theo vị trí.";
   }, [processingMode]);
 
+  const handlePdfUpload = async (file: File) => {
+    setIsConvertingPdf(true);
+    setConvertProgress("Đang mở file PDF...");
+    try {
+      const result: PdfConvertResult = await convertPdfFile(file, (stage, page, total) => {
+        setConvertProgress(`${stage} ${page}/${total}...`);
+      });
+      if (result.info.kind === "empty" || result.blocks.length === 0) {
+        alert("Không trích được nội dung từ PDF này. File có thể bị hỏng, đặt mật khẩu, hoặc là ảnh scan quá mờ để OCR.");
+        setFileStatus("Lỗi: không đọc được PDF");
+        setHasFile(false);
+        return;
+      }
+      const stats = analyzeDocumentHtml(result.html);
+      setRawText(result.rawText);
+      setSourceHtml(result.html);
+      setDocumentStats(stats);
+      setStructuredBlocks(result.blocks);
+      setPdfInfo(result.info);
+      setPdfWarnings(result.warnings);
+      setPdfOcrConfidence(result.ocrConfidence);
+      setHasFile(true);
+      setFileStatus(`Đã tải: ${file.name}`);
+      if (stats.administrativeHeaderDetected) {
+        setProcessingMode("nd30");
+        setShowPreviewFrame(false);
+      }
+    } catch (error: any) {
+      alert(`Không thể chuyển đổi PDF này: ${error?.message || "lỗi không xác định"}. Nếu file đặt mật khẩu, hãy gỡ mật khẩu rồi thử lại.`);
+      setFileStatus("Lỗi định dạng file PDF");
+      setHasFile(false);
+    } finally {
+      setIsConvertingPdf(false);
+      setConvertProgress("");
+    }
+  };
+
+  const handleExcelUpload = async (file: File) => {
+    setIsConvertingPdf(true);
+    setConvertProgress("Đang đọc file bảng tính...");
+    try {
+      const result = await convertExcelFile(file);
+      const stats = analyzeDocumentHtml(result.html);
+      setRawText(result.rawText);
+      setSourceHtml(result.html);
+      setDocumentStats(stats);
+      setStructuredBlocks(result.blocks);
+      setExcelSheets(result.sheets);
+      setExcelWarnings(result.warnings);
+      setHasFile(true);
+      setFileStatus(`Đã tải: ${file.name}`);
+    } catch (error: any) {
+      alert(error?.message || "Không thể đọc file bảng tính này.");
+      setFileStatus("Lỗi định dạng file bảng tính");
+      setHasFile(false);
+    } finally {
+      setIsConvertingPdf(false);
+      setConvertProgress("");
+    }
+  };
+
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     const extension = file.name.split(".").pop()?.toLowerCase();
+    setStructuredBlocks(null);
+    setPdfInfo(null);
+    setPdfWarnings([]);
+    setPdfOcrConfidence(undefined);
+    setExcelSheets(null);
+    setExcelWarnings([]);
+    if (extension === "pdf") {
+      setFileName(file.name.replace(/\.pdf$/i, ""));
+      setSourceHtml("");
+      setDocHtml("");
+      setRawText("");
+      setDocumentStats(EMPTY_STATS);
+      setIsLegacyDoc(false);
+      void handlePdfUpload(file);
+      return;
+    }
+    if (extension === "xlsx" || extension === "xls" || extension === "csv") {
+      setFileName(file.name.replace(/\.(xlsx|xls|csv)$/i, ""));
+      setSourceHtml("");
+      setDocHtml("");
+      setRawText("");
+      setDocumentStats(EMPTY_STATS);
+      setIsLegacyDoc(false);
+      void handleExcelUpload(file);
+      return;
+    }
     setFileName(file.name.replace(/\.(docx|doc)$/i, ""));
     setSourceHtml("");
     setDocHtml("");
@@ -229,7 +339,7 @@ export default function App() {
             <FileText className="w-8 h-8" /> <span>Chuẩn Hóa Văn Bản & Soát Lỗi AI</span>
           </h1>
           <p className="text-slate-600 mt-2 text-sm">
-            Công cụ hỗ trợ tải file Word, soát lỗi văn phong, căn chỉnh theo NĐ 30/2020/NĐ-CP và xuất lại file.
+            Công cụ hỗ trợ tải file Word, PDF (có lớp chữ, scan qua OCR, hỗn hợp) và file bảng tính Excel/CSV, soát lỗi văn phong, căn chỉnh theo NĐ 30/2020/NĐ-CP và xuất lại file Word chuẩn thể thức hoặc file Excel các bảng đã trích.
           </p>
         </header>
 
@@ -242,9 +352,15 @@ export default function App() {
               </h2>
               <label htmlFor="fileInput" className="cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 transition-colors rounded-lg p-8 flex flex-col items-center">
                 <Upload className="w-7 h-7 text-slate-500 mb-2" />
-                <span className="text-sm text-slate-700 font-medium">Tải lên file (.docx)</span>
+                <span className="text-sm text-slate-700 font-medium">Tải lên file (.docx, .pdf hoặc .xlsx)</span>
+                <span className="text-xs text-slate-500 mt-1">PDF scan sẽ tự OCR tiếng Việt · Excel/CSV sẽ thành bảng trong Word</span>
               </label>
-              <input type="file" id="fileInput" accept=".docx,.doc" className="hidden" onChange={handleFileUpload} />
+              <input type="file" id="fileInput" accept=".docx,.doc,.pdf,.xlsx,.xls,.csv" className="hidden" onChange={handleFileUpload} />
+              {isConvertingPdf && (
+                <p className="text-xs mt-3 text-center text-blue-700 flex items-center justify-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> {convertProgress || "Đang chuyển đổi PDF..."}
+                </p>
+              )}
               <div className="text-xs mt-3 text-center">
                 {hasFile ? (
                   <span className="text-emerald-600 flex flex-col items-center gap-1">
@@ -257,6 +373,28 @@ export default function App() {
                 )}
                 {isLegacyDoc && <p className="mt-2 text-amber-600">Nên chuyển file .doc sang .docx trước khi xử lý.</p>}
               </div>
+              {pdfInfo && (
+                <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-slate-700 text-left">
+                  <div className="font-medium text-blue-800 mb-1">Kết quả chuyển PDF → Word</div>
+                  <div>Loại PDF: <b>{pdfInfo.label}</b></div>
+                  <div>Số trang: <b>{pdfInfo.totalPages}</b> · Trang có lớp chữ: <b>{pdfInfo.textPages}</b> · Trang OCR: <b>{pdfInfo.ocrPages}</b></div>
+                  {pdfOcrConfidence !== undefined && <div>Độ tin cậy OCR trung bình: <b>{pdfOcrConfidence}%</b></div>}
+                  {pdfWarnings.map((w, i) => (
+                    <p key={i} className="mt-1.5 text-amber-700 flex gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> <span>{w}</span></p>
+                  ))}
+                </div>
+              )}
+              {excelSheets && (
+                <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs text-slate-700 text-left">
+                  <div className="font-medium text-emerald-800 mb-1">Kết quả chuyển Excel → Word</div>
+                  {excelSheets.map((s, i) => (
+                    <div key={i}>Sheet <b>{s.name}</b>: {s.rowCount} dòng × {s.colCount} cột</div>
+                  ))}
+                  {excelWarnings.map((w, i) => (
+                    <p key={i} className="mt-1.5 text-amber-700 flex gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> <span>{w}</span></p>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className={cn("bg-white p-5 rounded-xl shadow-sm border border-slate-200", disabledSection)}>
@@ -386,9 +524,23 @@ export default function App() {
                 <span className="bg-blue-100 text-blue-800 w-6 h-6 rounded flex items-center justify-center text-sm">5</span>
                 Hoàn Tất
               </h2>
-              <button onClick={() => exportToWord(previewRef.current, fileName, config)} className="w-full bg-blue-800 hover:bg-blue-900 text-white font-medium py-2.5 rounded flex justify-center items-center gap-2 transition-colors">
-                <Save className="w-4 h-4" /> Tải Xuống File Word (.doc)
-              </button>
+              {structuredBlocks ? (
+                <>
+                  <button onClick={() => void exportBlocksToWord(structuredBlocks, fileName, config)} className="w-full bg-blue-800 hover:bg-blue-900 text-white font-medium py-2.5 rounded flex justify-center items-center gap-2 transition-colors">
+                    <Save className="w-4 h-4" /> Tải File Word (.docx) Chuẩn NĐ 30
+                  </button>
+                  <p className="text-xs text-slate-500 mt-2">File .docx thật, dựng từ cấu trúc đã trích xuất: giữ bảng, phần đầu thể thức, khối chữ ký và trình bày đúng NĐ 30.</p>
+                  {extractedTableCount > 0 && (
+                    <button onClick={() => exportBlocksTablesToExcel(structuredBlocks, fileName)} className="w-full mt-3 bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-2.5 rounded flex justify-center items-center gap-2 transition-colors">
+                      <Save className="w-4 h-4" /> Tải Excel (.xlsx) — {extractedTableCount} bảng đã trích
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button onClick={() => exportToWord(previewRef.current, fileName, config)} className="w-full bg-blue-800 hover:bg-blue-900 text-white font-medium py-2.5 rounded flex justify-center items-center gap-2 transition-colors">
+                  <Save className="w-4 h-4" /> Tải Xuống File Word (.doc)
+                </button>
+              )}
             </section>
           </aside>
 
@@ -503,7 +655,7 @@ export default function App() {
                   }
                   .document-content .admin-agency-line { font-size: 12pt !important; font-weight: normal !important; text-transform: uppercase; }
                   .document-content .admin-unit-line { font-size: 12.5pt !important; font-weight: bold !important; text-transform: uppercase; }
-                  .document-content .admin-number-line { font-size: 12pt !important; font-weight: normal !important; }
+                  .document-content .admin-number-line { font-size: 13pt !important; font-weight: normal !important; }
                   .document-content .admin-national-line { font-size: 12pt !important; font-weight: bold !important; letter-spacing: -0.25pt; text-transform: uppercase; }
                   .document-content .admin-motto-line { font-size: 13pt !important; font-weight: bold !important; display: inline-block; border-bottom: 1px solid #000; padding-bottom: 1pt; }
                   .document-content .admin-date-line { font-size: 12pt !important; font-style: italic; }
@@ -532,7 +684,7 @@ export default function App() {
                 {!hasFile ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 py-32">
                     <FileQuestion className="w-16 h-16 mb-4 text-slate-200" />
-                    <p className="text-sm">Tải file .docx để xem trước văn bản tại đây.</p>
+                    <p className="text-sm">Tải file .docx, .pdf hoặc .xlsx để xem trước văn bản tại đây.</p>
                   </div>
                 ) : (
                   <div ref={previewRef} className="document-content outline-none" dangerouslySetInnerHTML={{ __html: docHtml }} />
