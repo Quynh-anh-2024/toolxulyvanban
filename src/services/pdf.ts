@@ -175,7 +175,21 @@ export async function convertPdfFile(
   onProgress?: PdfProgress
 ): Promise<PdfConvertResult> {
   const buffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  // BẮT BUỘC khai báo cMapUrl/standardFontDataUrl/wasmUrl trỏ tới bản LOCAL
+  // trong public/: pdf.js trên trình duyệt KHÔNG tự có các tệp này (khác môi
+  // trường Node, nơi chúng nằm sẵn cạnh gói cài đặt). Thiếu CMap, các PDF in
+  // từ hệ thống trường học/cổng dịch vụ dùng font CID sẽ bị giải mã thành ký
+  // tự sai — lớp chữ hoàn hảo bị bộ lọc tưởng là "lỗi font" và app buộc phải
+  // OCR oan, cho ra chữ sai dấu. (Đã gặp thật với CV 5095/BGDĐT và bảng tổng
+  // hợp kết quả đánh giá in từ hệ thống quản lý trường học.)
+  const base = (import.meta as any).env?.BASE_URL || "/";
+  const pdf = await pdfjsLib.getDocument({
+    data: buffer,
+    cMapUrl: `${base}cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `${base}standard_fonts/`,
+    wasmUrl: `${base}wasm/`,
+  }).promise;
   const pages: PdfPageInput[] = [];
   const warnings: string[] = [];
   const confidences: number[] = [];
