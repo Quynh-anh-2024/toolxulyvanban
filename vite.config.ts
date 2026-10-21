@@ -8,5 +8,10 @@ export default defineConfig({
     tailwindcss(),
     react()
   ],
+  // Worker pdf.js (src/workers/pdfWorker.ts) là ES module (dùng import.meta)
+  // nên phải xuất dạng module, không dùng dạng iife mặc định.
+  worker: {
+    format: 'es'
+  },
   base: '/', // Đường dẫn chuẩn cho Vercel
 })

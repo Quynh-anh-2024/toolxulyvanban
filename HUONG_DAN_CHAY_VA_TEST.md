@@ -118,6 +118,31 @@ Lưu ý: CV 5095/BGDĐT là bản scan thật (mỗi trang là 1 ảnh, lớp ch
 thông tin con dấu ký số) nên app đi đường OCR là ĐÚNG — chất lượng chữ
 phụ thuộc độ nét của bản scan gốc.
 
+## Bản vá 21/10/2026 (tối) — Lỗi "undefined is not a function" trên iPhone/Safari cũ
+
+Triệu chứng đã gặp thật: mở app trên iPhone, nạp PDF nào cũng báo
+"Không thể chuyển đổi PDF này: undefined is not a function (near
+'...i of t...')", trong khi trên máy tính/Chrome chạy bình thường.
+Nguyên nhân: pdf.js v6 dùng nhiều API JavaScript rất mới mà Safari cũ
+chưa có — điển hình là duyệt ReadableStream bằng `for await...of`
+(Safari 18.4+), `Promise.withResolvers` (17.4+), `.at()` (15.4+) và
+`replaceAll` khi dịch font. Hàm đọc chữ của pdf.js (`getTextContent`)
+lặp stream đúng kiểu mới nên PDF nào cũng chết trên Safari cũ.
+
+Đã sửa:
+- Chuyển sang pdf.js BẢN LEGACY (có sẵn một phần polyfill core-js).
+- Thêm `src/utils/browserPolyfills.ts` vá đúng các API còn thiếu
+  (ReadableStream async iterator, Promise.withResolvers/try, .at,
+  replaceAll), cài TRƯỚC khi pdf.js nạp, ở cả main thread lẫn worker
+  (qua `src/workers/pdfWorker.ts` + `GlobalWorkerOptions.workerPort`),
+  gắn kiểu non-enumerable như API bản địa.
+- Service worker đổi cache sang `xlvb-v3` để điện thoại tự bỏ bản cũ.
+- Thêm `tests/repro-old-safari.py`: giả lập Safari cũ bằng cách gỡ toàn
+  bộ API mới cùng lúc mà vẫn chuyển đổi THÀNH CÔNG cả PDF có lớp chữ
+  lẫn PDF scan/OCR mới đạt. Lưu ý khi test tay trên iPhone đã cài app ra
+  màn hình chính: mở lại app 1–2 lần để bản mới được nạp; nếu vẫn hiện
+  bản cũ thì xoá app khỏi màn hình chính rồi thêm lại.
+
 ## Kiểm thử tự động (nếu muốn)
 
 - `npm run test:pdf` — chạy test logic + test đầu-cuối (cần `npx tsx`,
