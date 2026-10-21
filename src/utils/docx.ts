@@ -50,18 +50,12 @@ function tableLooksLikeAdministrativeHeader(table: HTMLTableElement, index: numb
     text.includes("CONG HOA XA HOI CHU NGHIA VIET NAM") ||
     (text.includes("DOC LAP") && text.includes("TU DO") && text.includes("HANH PHUC"));
 
-  const hasAgencyHeader = hasAnyKeyword(text, [
-    "UBND",
-    "UY BAN NHAN DAN",
-    "PHONG GIAO DUC",
-    "PHONG GD",
-    "SO GIAO DUC",
-    "TRUONG",
-    "SO:",
-    "Số:",
-  ]);
-
-  return index <= 2 && (hasNationalHeader || hasAgencyHeader);
+  // CHỈ dựng lại bảng khi thấy QUỐC HIỆU/TIÊU NGỮ — dấu hiệu định danh của
+  // phần đầu thể thức. Trước đây chỉ cần có từ khoá cơ quan ("TRUONG", "SO:")
+  // là dựng lại: mọi bảng dữ liệu có cột "Trường" đều bị phá thành bảng đầu
+  // giả kèm số ký hiệu bịa. Bảng không có quốc hiệu thì giữ nguyên như bảng
+  // thường — thà giữ viền còn hơn phá dữ liệu của người dùng.
+  return index <= 2 && hasNationalHeader;
 }
 
 function tableLooksLikeSignatureBlock(table: HTMLTableElement, index: number, total: number): boolean {
@@ -109,15 +103,27 @@ function cleanDisplayText(value: string): string {
     .trim();
 }
 
+/** Text của một phần tử nhưng giữ ngắt dòng <br> thành "\n" trước khi đọc. */
+function textWithBreaks(el: Element): string {
+  const clone = el.cloneNode(true) as Element;
+  clone.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+  return clone.textContent || "";
+}
+
 function getPlainLinesFromCell(cell?: HTMLTableCellElement | null): string[] {
   if (!cell) return [];
+  // Một ô Word thường chứa NHIỀU dòng trong cùng một đoạn, ngăn bằng <br>
+  // (xuống dòng mềm). Đọc textContent thuần sẽ dính hết thành một dòng
+  // ("UBND TỈNH...SỞ GIÁO DỤC...Số: 123...") khiến không nhận ra dòng số
+  // ký hiệu. Phải tách theo cả <br> lẫn đoạn.
   const paragraphLines = Array.from(cell.querySelectorAll("p"))
-    .map((p) => cleanDisplayText(p.textContent || ""))
+    .flatMap((p) => textWithBreaks(p).split(/\r?\n+/))
+    .map(cleanDisplayText)
     .filter(Boolean);
 
   if (paragraphLines.length > 0) return paragraphLines;
 
-  return (cell.textContent || "")
+  return textWithBreaks(cell)
     .split(/\r?\n+/)
     .map(cleanDisplayText)
     .filter(Boolean);
@@ -158,7 +164,10 @@ function isAgencyLine(normalized: string): boolean {
 }
 
 function isNumberLine(normalized: string): boolean {
-  return normalized.startsWith("SO:") || normalized.startsWith("SO ") || normalized.startsWith("SỐ:") || normalized.startsWith("SỐ ");
+  // Dòng số ký hiệu: "SO: 123/..." hoặc "SO 123/...". KHÔNG được chỉ khớp
+  // tiền tố "SO " — "SỞ GIÁO DỤC" bỏ dấu cũng thành "SO GIAO DUC" và đã từng
+  // bị lấy nhầm làm dòng số ký hiệu, đẩy số thật ra khỏi văn bản.
+  return /^SO:\s*\S/.test(normalized) || /^SO\s+\d/.test(normalized);
 }
 
 function lineContainsDate(normalized: string): boolean {
@@ -265,22 +274,35 @@ function extractAdministrativeHeaderData(table: HTMLTableElement) {
     mottoLineCandidate = "Độc lập - Tự do - Hạnh phúc";
   }
 
+  // Số ký hiệu và ngày tháng là DỮ LIỆU của văn bản: không tìm thấy thì để
+  // TRỐNG. Tuyệt đối không chèn dòng mẫu kiểu "Số: /KH-..." — đó là bịa số
+  // hiệu vào văn bản của người dùng (bản cũ đã mắc lỗi này).
   const numberLine =
     firstLineMatchingRaw(leftBottom, isNumberLine) ||
     firstLineMatchingRaw(leftTop, isNumberLine) ||
     firstLineMatchingRaw(allLines, isNumberLine) ||
-    "Số:        /KH-...";
+    "";
 
   const dateLine =
     firstLineMatchingRaw(rightBottom, lineContainsDate) ||
     firstLineMatchingRaw(rightTop, lineContainsDate) ||
     firstLineMatchingRaw(allLines, lineContainsDate) ||
     rightBottom.find((line) => !isMottoLine(normalizeText(line)) && !isNationalLine(normalizeText(line))) ||
-    "..., ngày ... tháng ... năm ...";
+    "";
+
+  // NĐ 30: cơ quan chủ quản in thường, cơ quan BAN HÀNH in đậm. Khi cột trái
+  // có từ 2 dòng cơ quan trở lên mà chưa tách được dòng ban hành riêng, dòng
+  // cơ quan CUỐI cùng chính là cơ quan ban hành (vd: "UBND TỈNH..." là chủ
+  // quản, "SỞ GIÁO DỤC..." là ban hành).
+  const cleanedAgency = uniqueCleanLines(agencyLines);
+  let cleanedUnit = uniqueCleanLines(unitLines);
+  if (cleanedUnit.length === 0 && cleanedAgency.length >= 2) {
+    cleanedUnit = [cleanedAgency.pop() as string];
+  }
 
   return {
-    agencyLines: uniqueCleanLines(agencyLines).map(normalizeHeaderLine),
-    unitLines: uniqueCleanLines(unitLines).map(normalizeHeaderLine),
+    agencyLines: cleanedAgency.map(normalizeHeaderLine),
+    unitLines: cleanedUnit.map(normalizeHeaderLine),
     numberLine: normalizeHeaderLine(numberLine),
     nationalLine: normalizeHeaderLine(nationalLineCandidate || "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"),
     mottoLine: normalizeHeaderLine(mottoLineCandidate),
@@ -357,8 +379,13 @@ function createCleanAdministrativeHeaderTable(sourceTable: HTMLTableElement, sho
   applyCleanAdminCellAttributes(leftBottomCell, "left");
   applyCleanAdminCellAttributes(rightBottomCell, "right");
 
-  leftBottomCell.appendChild(createCleanAdminParagraph(doc, data.numberLine, "admin-number-line"));
-  rightBottomCell.appendChild(createCleanAdminParagraph(doc, data.dateLine, "admin-date-line"));
+  // Chỉ thêm dòng khi có dữ liệu thật (số ký hiệu/ngày tháng có thể trống).
+  if (data.numberLine) {
+    leftBottomCell.appendChild(createCleanAdminParagraph(doc, data.numberLine, "admin-number-line"));
+  }
+  if (data.dateLine) {
+    rightBottomCell.appendChild(createCleanAdminParagraph(doc, data.dateLine, "admin-date-line"));
+  }
 
   return table;
 }
@@ -446,7 +473,7 @@ function markAdministrativeHeaderCellContent(table: HTMLTableElement) {
           return;
         }
 
-        if (text.startsWith("SO:") || text.startsWith("SỐ:") || text.startsWith("SO ")) {
+        if (isNumberLine(text)) {
           paragraph.classList.add("admin-number-line");
           return;
         }
@@ -738,7 +765,9 @@ function applyReliableWordHeaderStyles(root: HTMLElement) {
           'text-transform': 'uppercase',
           'white-space': 'nowrap',
           'letter-spacing': '-0.1pt',
-          'font-size': '10.8pt',
+          // NĐ 30: quốc hiệu cỡ 12-13pt. Trước đây để 10.8pt cho "vừa cột" là
+          // LỆCH CHUẨN — đã đo lại: dòng quốc hiệu 13pt vẫn vừa cột phải 64%.
+          'font-size': '13pt',
         });
         return;
       }
@@ -748,7 +777,8 @@ function applyReliableWordHeaderStyles(root: HTMLElement) {
           ...baseStyles,
           'font-weight': 'bold',
           'white-space': 'nowrap',
-          'font-size': '12.5pt',
+          // NĐ 30: tiêu ngữ cỡ 13-14pt (trước đây 12.5pt là lệch chuẩn).
+          'font-size': '13pt',
           'text-decoration': 'none',
           'border-bottom': '1pt solid #000',
           'display': 'inline-block',
@@ -996,7 +1026,7 @@ export function exportToWord(
               text-transform: uppercase !important;
               white-space: nowrap !important;
               letter-spacing: -0.25pt !important;
-              font-size: 10.8pt !important;
+              font-size: 13pt !important;
           }
           .admin-motto-line {
               font-weight: bold !important;
@@ -1004,7 +1034,7 @@ export function exportToWord(
               display: inline-block !important;
               padding-bottom: 1pt !important;
               border-bottom: 1pt solid #000 !important;
-              font-size: 12.5pt !important;
+              font-size: 13pt !important;
           }
           .admin-date-line {
               text-align: center !important;
