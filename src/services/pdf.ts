@@ -11,10 +11,22 @@
  * chèn ảnh toàn trang (tránh trùng với chữ OCR) — chữ ký/dấu mộc trên trang scan sẽ
  * không qua được OCR, xem cảnh báo trả về.
  */
-import * as pdfjsLib from "pdfjs-dist";
-// Worker của pdf.js — Vite đóng gói sẵn, không phụ thuộc CDN.
-// @ts-ignore — khai báo ?url của Vite
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+// Cài vá tương thích trình duyệt cũ TRƯỚC TIÊN (import này phải đứng đầu:
+// các import chạy theo thứ tự, trước khi pdf.js được nạp — xem
+// utils/browserPolyfills.ts về vụ Safari/iOS cũ lỗi "undefined is not a
+// function" khi mở PDF).
+import "../utils/installPolyfills";
+// Dùng BẢN LEGACY của pdf.js: bản chuẩn v6 đòi trình duyệt rất mới
+// (Promise.withResolvers từ Safari 17.4, iterator helpers từ Safari 26...)
+// khiến iPhone đời cũ lỗi ngay khi mở PDF. Bản legacy có sẵn polyfill
+// core-js cho các API đó. Phần legacy KHÔNG vá được — duyệt ReadableStream
+// bằng for await...of (Safari < 18.4) và Promise.withResolvers trong worker —
+// do utils/browserPolyfills.ts đảm nhiệm ở cả main thread lẫn worker.
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+// Worker của pdf.js — qua điểm vào riêng (src/workers/pdfWorker.ts) để cài
+// vá tương thích ngay trong worker trước khi pdf.js chạy.
+// @ts-ignore — khai báo ?worker của Vite
+import PdfWorker from "../workers/pdfWorker.ts?worker";
 // Worker của Tesseract — BẮT BUỘC chỉ định file local: để mặc định, thư viện sẽ
 // tải worker từ CDN (jsdelivr) và lỗi 404 khiến OCR treo/Thất bại. Core wasm và
 // dữ liệu ngôn ngữ vie/eng cũng đã đóng gói sẵn trong thư mục public/.
@@ -33,7 +45,9 @@ import {
   type PdfClassification,
 } from "../utils/pdfStructure";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+// Vá tương thích ở main thread đã được cài bởi import đầu tiên ở đầu file
+// (utils/installPolyfills) — trước cả khi pdf.js được nạp.
+pdfjsLib.GlobalWorkerOptions.workerPort = new PdfWorker();
 
 /** Số ký tự tối thiểu để coi một trang là "có lớp chữ". */
 const MIN_CHARS_PER_PAGE = 24;
