@@ -93,6 +93,31 @@ ngắt mạng hoàn toàn → app vẫn mở, xuất được .docx, OCR vẫn �
 Lưu ý: khi có bản app mới, service worker tự cập nhật ở lần mở sau; nếu thấy
 giao diện cũ, đóng app mở lại 2 lần.
 
+## Bản vá 21/10/2026 (chiều) — PDF in từ hệ thống trường học bị OCR oan
+
+Triệu chứng đã gặp thật: nạp bảng tổng hợp kết quả đánh giá (PDF có lớp chữ
+hoàn hảo) thì bản xem trước và file xuất ra toàn ký tự rác. Nguyên nhân:
+pdf.js chèn nhiều mẩu chỉ chứa khoảng trắng giữa các ô; bộ lọc "trang lỗi
+font" đếm cả chúng nên một bảng điểm bình thường (hầu hết ô là 1 ký tự:
+Đ, T, số) bị kết luận nhầm là "chữ vỡ từng ký tự" → app OCR oan → rác.
+
+Đã sửa:
+- Bộ lọc chỉ xét các mẩu chữ có nội dung; luật "chữ tách rời" phải kèm
+  bằng chứng mất gần hết dấu tiếng Việt mới kết luận lỗi font.
+- Đóng gói thêm `public/cmaps/`, `public/standard_fonts/`, `public/wasm/`
+  và khai báo cho pdf.js — tài nguyên pdf.js cần trên trình duyệt để giải
+  mã đúng các font hệ thống (ở môi trường Node chúng có sẵn nên test Node
+  không phát hiện được thiếu sót này).
+- Thêm test trình duyệt thật `tests/browser-real-pdf-test.py` chạy với
+  PDF thật từ hệ thống trường học (để trong `tests/real/`, không đóng gói
+  cùng bản phát hành vì có dữ liệu học sinh): xem trước phải đọc thẳng lớp
+  chữ, file Excel/Word tải xuống phải sạch. Từ nay, kết luận về PDF hệ
+  thống chỉ dựa trên test trình duyệt này, không dựa vào test Node.
+
+Lưu ý: CV 5095/BGDĐT là bản scan thật (mỗi trang là 1 ảnh, lớp chữ chỉ có
+thông tin con dấu ký số) nên app đi đường OCR là ĐÚNG — chất lượng chữ
+phụ thuộc độ nét của bản scan gốc.
+
 ## Kiểm thử tự động (nếu muốn)
 
 - `npm run test:pdf` — chạy test logic + test đầu-cuối (cần `npx tsx`,
