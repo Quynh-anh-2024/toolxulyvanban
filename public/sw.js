@@ -14,7 +14,7 @@
  *   — trả ngay từ bộ nhớ đệm nếu có, đồng thời tải bản mới ở nền.
  * - Mỗi lần đổi CACHE_VERSION, bộ nhớ đệm cũ bị xoá sạch khi kích hoạt.
  */
-const CACHE_VERSION = "xlvb-v2";
+const CACHE_VERSION = "xlvb-v3";
 const CORE_ASSETS = [
   "/",
   "/index.html",
