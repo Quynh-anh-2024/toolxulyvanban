@@ -162,3 +162,30 @@ lặp stream đúng kiểu mới nên PDF nào cũng chết trên Safari cũ.
 - Đậm/nghiêng lẻ trong thân bài PDF có thể mất (pdf.js không đọc được
   thuộc tính này của font subset); tiêu đề, trích yếu, các mục và hàng đầu
   bảng vẫn được áp đậm đúng thể thức khi xuất Word.
+
+## Cập nhật 22/10/2026 — sửa cơ chế quét (OCR) + tách mục giao diện
+
+- **Sự cố**: bản Word từ PDF scan (CV 5095/BGDĐT) ra lò không dùng được:
+  đoạn văn bị xáo trộn thứ tự, mất cả dòng chữ, tên cơ quan ban hành bị
+  mất, khối chữ ký chen vào giữa "Nơi nhận" — dù Tesseract đọc đúng ~89%.
+- **Nguyên nhân**: tầng dựng cấu trúc dùng chung máy tách cột/bảng của PDF
+  có lớp chữ cho trang scan: khe căn đều > ~13pt bị coi là ranh cột → đoạn
+  văn thành "bảng" giả; gán cột thất bại thì segment bị NUỐT mất; dòng bị
+  Tesseract gộp 2 cột đầu trang làm mất tên cơ quan.
+- **Cách sửa**: trang scan đi đường riêng — giữ nguyên dòng/đoạn do
+  Tesseract phân đoạn (lineId/paraId), chỉ tách segment ở khe rất rộng
+  (≥2,4× cỡ chữ), lọc từ rác theo độ tin cậy (<30; mảnh 1 ký tự <60),
+  tách khối chữ ký khỏi vùng "Nơi nhận", bảng chỉ dựng khi cột khớp rất
+  chặt (≥4 dòng, số cột bằng nhau, lệch ≤14pt). PDF có lớp chữ giữ nguyên
+  đường cũ. Đo lại trên CV 5095 trang 1 (bản chép tay đối chiếu): tầng cấu
+  trúc mất 5% → 0%; Word tải từ trình duyệt phủ 86,6% → 91,1%, đoạn văn
+  nguyên vẹn đúng thứ tự. Phần sai còn lại là Tesseract đọc sai dấu trên
+  bản scan cổng (trần của OCR offline), app có cảnh báo soát lại.
+- **Giao diện**: một màn hình kiểu app phiếu học tập (thanh trên + cột
+  công cụ/cột xem trước tự cuộn, điện thoại có tab Công cụ/Xem trước) với
+  3 MỤC RIÊNG: "PDF → Word" (chỉ PDF → .docx), "Excel" (bảng tính →
+  Word/Excel + trích bảng từ PDF → Excel), "Word & AI" (chuẩn hoá .docx
+  + soát lỗi AI). Mỗi mục giữ kết quả riêng, chuyển mục không mất việc.
+- Kiểm chứng: unit 15/15 (thêm test hồi quy trang scan), e2e 7/7, Excel
+  5/5, test trình duyệt PDF thật đạt (kể cả luồng Excel mới), UI smoke,
+  chuẩn hoá Word, PWA offline đều đạt.
