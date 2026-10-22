@@ -48,23 +48,10 @@ const EMPTY_STATS: DocumentStats = {
 const processingModes: Array<{
   value: DocumentProcessingMode;
   title: string;
-  description: string;
 }> = [
-  {
-    value: "preserve",
-    title: "Giữ nguyên định dạng gốc tối đa",
-    description: "Ưu tiên giữ khung/bảng, phù hợp công văn, đơn, biên bản, biểu mẫu.",
-  },
-  {
-    value: "nd30",
-    title: "Chuẩn hóa theo NĐ 30",
-    description: "Ẩn khung kỹ thuật phần đầu khi xuất Word, căn lại tiêu đề văn bản.",
-  },
-  {
-    value: "textOnly",
-    title: "Chỉ lấy nội dung để AI soát lỗi",
-    description: "Không cố chuẩn hóa bố cục, dùng khi tài liệu quá phức tạp.",
-  },
+  { value: "preserve", title: "Giữ nguyên định dạng gốc tối đa" },
+  { value: "nd30", title: "Chuẩn hóa theo NĐ 30" },
+  { value: "textOnly", title: "Chỉ lấy nội dung để AI soát lỗi" },
 ];
 
 /**
@@ -432,11 +419,10 @@ export default function App() {
     setIsAIModalOpen(false);
   };
 
-  const uploadHint = (label: string, sub: string) => (
+  const uploadHint = (label: string) => (
     <>
       <Upload className="w-7 h-7 text-slate-500 mb-2" />
       <span className="text-sm text-slate-700 font-medium">{label}</span>
-      <span className="text-xs text-slate-500 mt-1">{sub}</span>
     </>
   );
 
@@ -468,7 +454,6 @@ export default function App() {
         </span>
         <div className="min-w-0">
           <h1 className="text-lg md:text-xl font-bold text-blue-800 leading-tight truncate">Chuẩn Hóa Văn Bản & Soát Lỗi AI</h1>
-          <p className="text-xs text-slate-500 truncate hidden sm:block">Chuyển PDF → Word chuẩn NĐ 30 · Excel riêng một mục · Chuẩn hoá Word & soát lỗi AI</p>
         </div>
         <span className="ml-auto hidden md:inline-flex text-xs font-medium bg-blue-50 text-blue-800 border border-blue-100 rounded-full px-3 py-1">NĐ 30/2020/NĐ-CP</span>
       </header>
@@ -510,36 +495,33 @@ export default function App() {
               <section className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                 <h2 className="text-base font-semibold mb-3 text-blue-700">Chuyển PDF sang Word</h2>
                 <label htmlFor="fileInput" className="cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 transition-colors rounded-lg p-8 flex flex-col items-center">
-                  {uploadHint("Tải lên file PDF", "Có lớp chữ đọc thẳng · bản scan: AI đánh lại hoặc quét OCR (chọn ở dưới)")}
+                  {uploadHint("Tải lên file PDF")}
                 </label>
                 <input type="file" id="fileInput" accept=".pdf" className="hidden" onChange={onPick((f) => void handlePdfFile(f))} />
                 <div className="mt-4 text-left">
-                  <div className="text-xs font-medium text-slate-600 mb-2">Cách đọc trang scan (trang không có lớp chữ):</div>
+                  <div className="text-xs font-medium text-slate-600 mb-2">Cách đọc trang scan:</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button type="button" onClick={() => setScanEngine("ai")} className={cn("rounded-lg border p-3 text-left transition-colors", scanEngine === "ai" ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-slate-300 bg-white hover:border-blue-400")}>
                       <div className="text-sm font-semibold text-blue-800">1 · AI đánh lại <span className="ml-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium text-white">Khuyên dùng</span></div>
-                      <p className="mt-1 text-xs text-slate-600">AI nhìn ảnh trang và chép lại từng chữ — độ chính xác như ABBYY, dấu tiếng Việt chuẩn. Cần internet + khóa Gemini. Trang có lớp chữ vẫn đọc thẳng lớp chữ.</p>
                     </button>
                     <button type="button" onClick={() => setScanEngine("ocr")} className={cn("rounded-lg border p-3 text-left transition-colors", scanEngine === "ocr" ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-slate-300 bg-white hover:border-blue-400")}>
                       <div className="text-sm font-semibold text-slate-700">2 · Quét OCR trên máy</div>
-                      <p className="mt-1 text-xs text-slate-600">Quét ngay trên máy, không cần mạng, không cần khóa. Bản scan mờ/nghiêng có thể sai dấu — nên soát lại.</p>
                     </button>
                   </div>
                   {scanEngine === "ai" && (
                     <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
                       {geminiKeySaved ? (
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-slate-700">Đã lưu khóa Gemini trên máy này — AI đánh lại sẵn sàng.</span>
+                          <span className="text-xs text-slate-700">Đã lưu khóa Gemini.</span>
                           <button type="button" className="shrink-0 text-xs font-medium text-blue-700 underline" onClick={() => { setGeminiKey(""); setGeminiKeySaved(false); }}>Xóa khóa</button>
                         </div>
                       ) : (
                         <>
-                          <label className="block text-xs font-medium text-slate-700" htmlFor="geminiKeyInput">Khóa Gemini (miễn phí tại aistudio.google.com/apikey):</label>
+                          <label className="block text-xs font-medium text-slate-700" htmlFor="geminiKeyInput">Khóa Gemini — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">bấm vào đây để lấy khóa miễn phí</a>:</label>
                           <div className="mt-1.5 flex gap-2">
                             <input id="geminiKeyInput" type="password" value={geminiKeyInput} onChange={(e) => setGeminiKeyInput(e.target.value)} placeholder="Dán khóa Gemini của bạn vào đây" className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" autoComplete="off" />
                             <button type="button" className="shrink-0 rounded bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800" onClick={() => { if (geminiKeyInput.trim()) { setGeminiKey(geminiKeyInput); setGeminiKeySaved(true); setGeminiKeyInput(""); } }}>Lưu khóa</button>
                           </div>
-                          <p className="mt-1.5 text-[11px] text-slate-500">Khóa chỉ lưu trong trình duyệt trên máy này, không nằm trong mã nguồn, không gửi đi đâu ngoài Google AI. Dán một lần, dùng mãi.</p>
                         </>
                       )}
                     </div>
@@ -565,7 +547,7 @@ export default function App() {
                 <button onClick={() => pdfBlocks && void exportBlocksToWord(pdfBlocks, fileName, config)} className="w-full bg-blue-800 hover:bg-blue-900 text-white font-medium py-2.5 rounded flex justify-center items-center gap-2 transition-colors">
                   <Save className="w-4 h-4" /> Tải File Word (.docx) Chuẩn NĐ 30
                 </button>
-                <p className="text-xs text-slate-500 mt-2">File .docx thật, dựng từ cấu trúc đã trích xuất: giữ bảng, phần đầu thể thức, khối chữ ký, trình bày đúng NĐ 30. Cần lấy bảng ra Excel? Sang mục <b>Excel</b>.</p>
+
               </section>
             </>
           )}
@@ -575,7 +557,7 @@ export default function App() {
               <section className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                 <h2 className="text-base font-semibold mb-3 text-emerald-700">Bảng tính Excel / CSV</h2>
                 <label htmlFor="excelInput" className="cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 transition-colors rounded-lg p-8 flex flex-col items-center">
-                  {uploadHint("Tải lên file .xlsx, .xls hoặc .csv", "Mỗi sheet thành một bảng trong Word")}
+                  {uploadHint("Tải lên file .xlsx, .xls hoặc .csv")}
                 </label>
                 <input type="file" id="excelInput" accept=".xlsx,.xls,.csv" className="hidden" onChange={onPick((f) => void handleExcelSheetFile(f))} />
                 {convertingLine}
@@ -606,9 +588,8 @@ export default function App() {
               <section className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                 <h2 className="text-base font-semibold mb-3 text-emerald-700">Trích bảng từ PDF ra Excel</h2>
                 <label htmlFor="pdfTableInput" className="cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 transition-colors rounded-lg p-8 flex flex-col items-center">
-                  {uploadHint("Tải lên file PDF có bảng", "Trích mọi bảng trong PDF thành các sheet Excel")}
+                  {uploadHint("Tải lên file PDF có bảng")}
                 </label>
-                <p className="mt-2 text-xs text-slate-500">Trang scan trong PDF này được đọc theo cách đã chọn ở mục <b>PDF → Word</b> (AI đánh lại hoặc quét OCR).</p>
                 <input type="file" id="pdfTableInput" accept=".pdf" className="hidden" onChange={onPick((f) => void handlePdfTablesFile(f))} />
                 {pdfTableBlocks && (
                   <div className="mt-3">
@@ -628,7 +609,7 @@ export default function App() {
               <section className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                 <h2 className="text-base font-semibold mb-3 text-blue-700">Chuẩn hoá file Word có sẵn</h2>
                 <label htmlFor="wordInput" className="cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 transition-colors rounded-lg p-8 flex flex-col items-center">
-                  {uploadHint("Tải lên file .docx hoặc .doc", "Giữ khung/bảng gốc, căn lại theo NĐ 30 khi xuất")}
+                  {uploadHint("Tải lên file .docx hoặc .doc")}
                 </label>
                 <input type="file" id="wordInput" accept=".docx,.doc" className="hidden" onChange={onPick(handleWordFile)} />
                 {statusLine}
@@ -643,7 +624,6 @@ export default function App() {
                         <input type="radio" className="mt-1" checked={processingMode === mode.value} onChange={() => setProcessingMode(mode.value)} />
                         <div>
                           <div className="text-sm font-semibold text-slate-800">{mode.title}</div>
-                          <div className="text-xs text-slate-500 leading-5">{mode.description}</div>
                         </div>
                       </div>
                     </label>
