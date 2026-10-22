@@ -97,15 +97,35 @@ async function ocrPageImage(
     const { data } = await worker.recognize(canvas, {}, { blocks: true } as any);
     const items: PdfTextItem[] = [];
     const blocks: any[] = (data as any).blocks || [];
+    // GIỮ NGUYÊN cấu trúc dòng/đoạn của Tesseract (lineId/paraId): việc gom
+    // dòng lại theo tọa độ y ở tầng cấu trúc đã từng làm vỡ văn bản scan —
+    // hộp từ OCR rung vài point là dòng bị xé, đoạn bị máy tách cột tưởng
+    // nhầm thành bảng rồi xáo trộn thứ tự đọc, nuốt mất chữ. Tesseract tự
+    // phân đoạn trang tốt hơn nhiều; tầng cấu trúc chỉ việc dùng lại.
+    let lineSeq = 0;
+    let paraSeq = 0;
     for (const block of blocks) {
       for (const para of block.paragraphs || []) {
+        paraSeq++;
         for (const line of para.lines || []) {
-          for (const word of line.words || []) {
+          lineSeq++;
+          const rawWords = (line.words || []).filter((w: any) => (w.text || "").trim());
+          const lineItems: PdfTextItem[] = [];
+          for (const word of rawWords) {
             const text = (word.text || "").trim();
-            if (!text) continue;
+            const conf = typeof word.confidence === "number" ? word.confidence : 100;
+            // Lọc rác theo độ tin cậy: chữ thật trên bản scan sạch hiếm khi
+            // dưới 30, còn rác từ con dấu/chữ ký/vết bẩn hầu như luôn dưới 30
+            // (đo trên CV 5095: 10/16 từ conf<50 là rác dấu mộc). Ngưỡng 30
+            // giữ lại được cả các từ thật bị đọc yếu (vd "trên;" conf 35).
+            if (conf < 30) continue;
+            // Mảnh vụn 1 ký tự (mảnh dấu, nét chữ ký lạc vào dòng chữ) với độ
+            // tin cậy trung bình: bỏ khi dòng còn nhiều từ khác — giữ lại
+            // nếu là số (mục lục, số thứ tự) hoặc dòng quá ngắn.
+            if (text.length === 1 && conf < 60 && !/[0-9]/.test(text) && rawWords.length >= 4) continue;
             const { x0, y0, x1 } = word.bbox;
             const h = (word.bbox.y1 - y0) / renderScale;
-            items.push({
+            lineItems.push({
               text: text + " ",
               x: x0 / renderScale,
               y: y0 / renderScale,
@@ -115,8 +135,15 @@ async function ocrPageImage(
               bold: false,
               italic: false,
               fontName: "ocr",
+              conf,
+              lineId: lineSeq,
+              paraId: paraSeq,
             });
           }
+          // Dòng không còn từ "giống chữ" nào (≥2 ký tự chữ/số) = thuần ký
+          // hiệu rác quanh dấu mộc — bỏ cả dòng, tránh chèn "~=<" vào Word.
+          const hasRealWord = lineItems.some((it) => /[0-9A-Za-zÀ-ỹĐđ]{2,}/.test(it.text));
+          if (hasRealWord) items.push(...lineItems);
         }
       }
     }
