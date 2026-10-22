@@ -87,13 +87,18 @@ def main() -> int:
         )
         panel = page.locator("text=Kết quả chuyển PDF").locator("..").inner_text()
         print("PANEL:\n", panel)
+        # Từ đợt A4, cảnh báo nằm ở khối RIÊNG cạnh khối số liệu — đọc cả
+        # section chứa panel để kiểm cảnh báo.
+        section_text = page.locator("text=Kết quả chuyển PDF").locator(
+            "xpath=ancestor::section[1]"
+        ).inner_text()
         if "Trang AI đánh lại: 1" not in panel:
             # Nhánh (b): môi trường chặn mạng tới Google — app phải rơi OCR
             # kèm cảnh báo rõ ràng, không treo, không mất nội dung.
             check("dự phòng OCR khi AI không tới được Google", "Trang OCR: 1" in panel)
             check(
                 "có cảnh báo AI đánh lại không thành công",
-                "AI đánh lại không thành công" in panel or "chưa có khóa Gemini" in panel,
+                "AI đánh lại không thành công" in section_text or "chưa có khóa Gemini" in section_text,
             )
             check("không có lỗi JS", not errors, "; ".join(errors[:2]))
             print("\nGHI CHÚ: nhánh AI chưa chạy được trong môi trường này (mạng tới Google bị chặn) — chỉ kiểm được nhánh dự phòng OCR.")
