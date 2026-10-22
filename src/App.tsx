@@ -125,6 +125,22 @@ export default function App() {
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [geminiKeySaved, setGeminiKeySaved] = useState<boolean>(() => hasGeminiKey());
 
+  // Thanh báo trong trang (thay cho alert): đỏ = lỗi, vàng = cảnh báo, xanh = xong.
+  const [notice, setNotice] = useState<{ kind: "error" | "warn" | "ok"; text: string } | null>(null);
+  const noticeTimer = useRef<number | undefined>(undefined);
+  const showNotice = (kind: "error" | "warn" | "ok", text: string) => {
+    setNotice({ kind, text });
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 7000);
+  };
+
+  // Xem trước: thu nhỏ trang A4 vừa bề rộng khung (mặc định bật khi màn hình nhỏ).
+  const [previewFit, setPreviewFit] = useState<boolean>(
+    () => typeof window !== "undefined" && window.innerWidth < 1024
+  );
+  const [previewScale, setPreviewScale] = useState(1);
+  const previewScrollRef = useRef<HTMLDivElement>(null);
+
   const [excelBlocks, setExcelBlocks] = useState<DocBlock[] | null>(null);
   const [excelSheets, setExcelSheets] = useState<SheetInfo[] | null>(null);
   const [excelWarnings, setExcelWarnings] = useState<string[]>([]);
@@ -155,6 +171,23 @@ export default function App() {
   const [aiStyle, setAiStyle] = useState("edu");
 
   const previewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = previewScrollRef.current;
+    if (!el) return;
+    const update = () => {
+      if (!previewFit) {
+        setPreviewScale(1);
+        return;
+      }
+      const w = el.clientWidth;
+      if (w > 0) setPreviewScale(Math.max(0.3, Math.min(1, (w - 36) / 794)));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [previewFit]);
 
   useEffect(() => {
     if (!sourceHtml) {
@@ -245,7 +278,7 @@ export default function App() {
         { scanEngine }
       );
       if (result.info.kind === "empty" || result.blocks.length === 0) {
-        alert("Không trích được nội dung từ PDF này. File có thể bị hỏng, đặt mật khẩu, hoặc là ảnh scan quá mờ để OCR.");
+        showNotice("error", "Không trích được nội dung từ PDF này. File có thể bị hỏng, đặt mật khẩu, hoặc là ảnh scan quá mờ để OCR.");
         setFileStatus("Lỗi: không đọc được PDF");
         setHasFile(false);
         return;
@@ -257,7 +290,7 @@ export default function App() {
       setPdfAiPages(result.aiPages);
       loadConverted(result.html, result.rawText, file.name.replace(/\.pdf$/i, ""));
     } catch (error: any) {
-      alert(`Không thể chuyển đổi PDF này: ${error?.message || "lỗi không xác định"}. Nếu file đặt mật khẩu, hãy gỡ mật khẩu rồi thử lại.`);
+      showNotice("error", `Không thể chuyển đổi PDF này: ${error?.message || "lỗi không xác định"}. Nếu file đặt mật khẩu, hãy gỡ mật khẩu rồi thử lại.`);
       setFileStatus("Lỗi định dạng file PDF");
       setHasFile(false);
     } finally {
@@ -277,7 +310,7 @@ export default function App() {
       setExcelWarnings(result.warnings);
       loadConverted(result.html, result.rawText, file.name.replace(/\.(xlsx|xls|csv)$/i, ""));
     } catch (error: any) {
-      alert(error?.message || "Không thể đọc file bảng tính này.");
+      showNotice("error", error?.message || "Không thể đọc file bảng tính này.");
       setFileStatus("Lỗi định dạng file bảng tính");
       setHasFile(false);
     } finally {
@@ -301,14 +334,14 @@ export default function App() {
         { scanEngine: engine }
       );
       if (result.blocks.length === 0) {
-        alert("Không trích được nội dung từ PDF này.");
+        showNotice("error", "Không trích được nội dung từ PDF này.");
         return;
       }
       setPdfTableBlocks(result.blocks);
       setPdfTableName(file.name);
       loadConverted(result.html, result.rawText, file.name.replace(/\.pdf$/i, ""));
     } catch (error: any) {
-      alert(`Không thể đọc PDF này: ${error?.message || "lỗi không xác định"}.`);
+      showNotice("error", `Không thể đọc PDF này: ${error?.message || "lỗi không xác định"}.`);
     } finally {
       setIsConverting(false);
       setConvertProgress("");
@@ -356,7 +389,7 @@ export default function App() {
           setShowPreviewFrame(false);
         }
       } catch {
-        alert("Không thể đọc file này. Nếu là file .doc, hãy mở bằng Word rồi Save As sang .docx.");
+        showNotice("error", "Không thể đọc file này. Nếu là file .doc, hãy mở bằng Word rồi Save As sang .docx.");
         setFileStatus("Lỗi định dạng file");
         setHasFile(false);
       }
@@ -498,35 +531,28 @@ export default function App() {
                   {uploadHint("Tải lên file PDF")}
                 </label>
                 <input type="file" id="fileInput" accept=".pdf" className="hidden" onChange={onPick((f) => void handlePdfFile(f))} />
-                <div className="mt-4 text-left">
-                  <div className="text-xs font-medium text-slate-600 mb-2">Cách đọc trang scan:</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button type="button" onClick={() => setScanEngine("ai")} className={cn("rounded-lg border p-3 text-left transition-colors", scanEngine === "ai" ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-slate-300 bg-white hover:border-blue-400")}>
-                      <div className="text-sm font-semibold text-blue-800">1 · AI đánh lại <span className="ml-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium text-white">Khuyên dùng</span></div>
-                    </button>
-                    <button type="button" onClick={() => setScanEngine("ocr")} className={cn("rounded-lg border p-3 text-left transition-colors", scanEngine === "ocr" ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-slate-300 bg-white hover:border-blue-400")}>
-                      <div className="text-sm font-semibold text-slate-700">2 · Quét OCR trên máy</div>
-                    </button>
+                <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-left">
+                  <span className="text-xs font-medium text-slate-600">Trang scan:</span>
+                  <div className="inline-flex overflow-hidden rounded-lg border border-slate-300">
+                    <button type="button" onClick={() => setScanEngine("ai")} className={cn("px-3 py-1.5 text-sm font-medium transition-colors", scanEngine === "ai" ? "bg-blue-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50")}>AI đánh lại</button>
+                    <button type="button" onClick={() => setScanEngine("ocr")} className={cn("border-l border-slate-300 px-3 py-1.5 text-sm font-medium transition-colors", scanEngine === "ocr" ? "bg-blue-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50")}>Quét OCR</button>
                   </div>
-                  {scanEngine === "ai" && (
-                    <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
-                      {geminiKeySaved ? (
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-slate-700">Đã lưu khóa Gemini.</span>
-                          <button type="button" className="shrink-0 text-xs font-medium text-blue-700 underline" onClick={() => { setGeminiKey(""); setGeminiKeySaved(false); }}>Xóa khóa</button>
-                        </div>
-                      ) : (
-                        <>
-                          <label className="block text-xs font-medium text-slate-700" htmlFor="geminiKeyInput">Khóa Gemini — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">bấm vào đây để lấy khóa miễn phí</a>:</label>
-                          <div className="mt-1.5 flex gap-2">
-                            <input id="geminiKeyInput" type="password" value={geminiKeyInput} onChange={(e) => setGeminiKeyInput(e.target.value)} placeholder="Dán khóa Gemini của bạn vào đây" className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" autoComplete="off" />
-                            <button type="button" className="shrink-0 rounded bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800" onClick={() => { if (geminiKeyInput.trim()) { setGeminiKey(geminiKeyInput); setGeminiKeySaved(true); setGeminiKeyInput(""); } }}>Lưu khóa</button>
-                          </div>
-                        </>
-                      )}
-                    </div>
+                  {scanEngine === "ai" && geminiKeySaved && (
+                    <span className="ml-auto text-xs text-slate-500">
+                      Đã lưu khóa Gemini ·{" "}
+                      <button type="button" className="font-medium text-blue-700 underline" onClick={() => { setGeminiKey(""); setGeminiKeySaved(false); }}>Xóa</button>
+                    </span>
                   )}
                 </div>
+                {scanEngine === "ai" && !geminiKeySaved && (
+                  <div className="mt-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-left">
+                    <label className="block text-xs font-medium text-slate-700" htmlFor="geminiKeyInput">Khóa Gemini — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">bấm vào đây để lấy khóa miễn phí</a>:</label>
+                    <div className="mt-1.5 flex gap-2">
+                      <input id="geminiKeyInput" type="password" value={geminiKeyInput} onChange={(e) => setGeminiKeyInput(e.target.value)} placeholder="Dán khóa Gemini của bạn vào đây" className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" autoComplete="off" />
+                      <button type="button" className="shrink-0 rounded bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800" onClick={() => { if (geminiKeyInput.trim()) { setGeminiKey(geminiKeyInput); setGeminiKeySaved(true); setGeminiKeyInput(""); showNotice("ok", "Đã lưu khóa Gemini."); } }}>Lưu khóa</button>
+                    </div>
+                  </div>
+                )}
                 {convertingLine}
                 {statusLine}
                 {pdfInfo && (
@@ -535,9 +561,18 @@ export default function App() {
                     <div>Loại PDF: <b>{pdfInfo.label}</b></div>
                     <div>Số trang: <b>{pdfInfo.totalPages}</b> · Trang có lớp chữ: <b>{pdfInfo.textPages}</b>{pdfAiPages !== undefined && <> · Trang AI đánh lại: <b>{pdfAiPages}</b></>} · Trang OCR: <b>{pdfInfo.ocrPages}</b></div>
                     {pdfOcrConfidence !== undefined && <div>Độ tin cậy OCR trung bình: <b>{pdfOcrConfidence}%</b></div>}
-                    {pdfWarnings.map((w, i) => (
-                      <p key={i} className="mt-1.5 text-amber-700 flex gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> <span>{w}</span></p>
-                    ))}
+                  </div>
+                )}
+                {pdfWarnings.length > 0 && (
+                  <div className="mt-2 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+                    {pdfWarnings.map((w, i) => {
+                      const severe = /không thành công|không đọc được|lỗi/i.test(w);
+                      return (
+                        <p key={i} className={cn("flex gap-1.5 text-xs", severe ? "font-medium text-red-700" : "text-amber-800")}>
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span>{w}</span>
+                        </p>
+                      );
+                    })}
                   </div>
                 )}
               </section>
@@ -568,8 +603,12 @@ export default function App() {
                     {excelSheets.map((s, i) => (
                       <div key={i}>Sheet <b>{s.name}</b>: {s.rowCount} dòng × {s.colCount} cột</div>
                     ))}
+                  </div>
+                )}
+                {excelWarnings.length > 0 && (
+                  <div className="mt-2 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
                     {excelWarnings.map((w, i) => (
-                      <p key={i} className="mt-1.5 text-amber-700 flex gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> <span>{w}</span></p>
+                      <p key={i} className="flex gap-1.5 text-xs text-amber-800"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span>{w}</span></p>
                     ))}
                   </div>
                 )}
@@ -737,13 +776,19 @@ export default function App() {
 
         {/* ----- Cột xem trước ----- */}
         <section className={cn("min-h-0 flex flex-col min-w-0", mobilePane === "preview" ? "flex" : "hidden", "lg:flex")}>
-          <div className="px-4 md:px-6 pt-4 pb-2 shrink-0">
-            <h2 className="text-lg font-bold text-slate-800">Bản Xem Trước (A4)</h2>
-            <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" /> {modeSummary}
-            </p>
+          <div className="px-4 md:px-6 pt-4 pb-2 shrink-0 flex flex-wrap items-start gap-2">
+            <div className="min-w-0 flex-1 basis-48">
+              <h2 className="text-lg font-bold text-slate-800">Bản Xem Trước (A4)</h2>
+              <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 shrink-0" /> {modeSummary}
+              </p>
+            </div>
+            <div className="ml-auto inline-flex shrink-0 overflow-hidden rounded-lg border border-slate-300">
+              <button type="button" onClick={() => setPreviewFit(true)} className={cn("px-2.5 py-1 text-xs font-medium transition-colors", previewFit ? "bg-blue-700 text-white" : "bg-white text-slate-600")}>Vừa màn hình</button>
+              <button type="button" onClick={() => setPreviewFit(false)} className={cn("border-l border-slate-300 px-2.5 py-1 text-xs font-medium transition-colors", !previewFit ? "bg-blue-700 text-white" : "bg-white text-slate-600")}>100%</button>
+            </div>
           </div>
-          <div className="flex-1 min-h-0 bg-slate-300 mx-4 md:mx-6 mb-4 md:mb-6 rounded-xl overflow-auto">
+          <div ref={previewScrollRef} className="flex-1 min-h-0 bg-slate-300 mx-4 md:mx-6 mb-4 md:mb-6 rounded-xl overflow-auto">
             {/* Bọc trang A4 trong lớp "w-max min-w-full flex justify-center":
                 trên điện thoại trang 794px rộng hơn màn hình — để mx-auto trực
                 tiếp trong khung cuộn sẽ làm mép TRÁI tràn ra vùng âm, không
@@ -751,7 +796,7 @@ export default function App() {
                 rộng bằng nội dung + căn giữa khi vừa khung thì cuộn được cả
                 2 phía. */}
             <div className="min-w-full w-max flex justify-center p-4 md:p-8">
-            <div className="bg-white shadow-xl relative shrink-0" style={{ width: "794px", minHeight: "1123px" }}>
+            <div className="bg-white shadow-xl relative shrink-0" style={{ width: "794px", minHeight: "1123px", zoom: previewScale }}>
               <style>{`
                 .document-content {
                   box-sizing: border-box;
@@ -889,6 +934,28 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      {notice && (
+        <div
+          className={cn(
+            "fixed bottom-4 left-1/2 z-50 flex w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 items-start gap-2 rounded-lg px-4 py-3 text-sm text-white shadow-2xl",
+            notice.kind === "error" && "bg-red-600",
+            notice.kind === "warn" && "bg-amber-500",
+            notice.kind === "ok" && "bg-emerald-600"
+          )}
+          role="alert"
+        >
+          {notice.kind === "ok" ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          ) : (
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          )}
+          <span className="min-w-0 flex-1">{notice.text}</span>
+          <button type="button" aria-label="Đóng thông báo" onClick={() => setNotice(null)} className="shrink-0 opacity-80 hover:opacity-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {isAIModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
