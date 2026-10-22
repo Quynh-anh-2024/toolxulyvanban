@@ -280,3 +280,27 @@ Kiểm chứng: mọi bộ test cũ đều đạt lại (unit 15, AI-text 14, Ex
 đầu-cuối 7, PDF thật trên trình duyệt, AI dự phòng, giao diện, chuẩn hoá
 Word, kiểm A1–A3, offline PWA) + 2 kiểm mới cho B6/B7 (nút Kiểm tra ra
 đúng thanh báo; scan 3 trang rơi OCR đủ 3 trang qua đường song song).
+
+## Cập nhật 22/10/2026 (tối) — Bỏ nút chọn cách đọc, xử lý TỰ ĐỘNG + đối chiếu
+
+Theo yêu cầu của thầy Hải: bỏ hẳn hai nút "AI đánh lại / Quét OCR".
+Upload file lên là app tự xử lý theo cách đã bàn:
+- Trang có lớp chữ: đọc thẳng lớp chữ (như cũ, chuẩn tuyệt đối).
+- Trang scan + ĐÃ có khóa Gemini: AI chép trực tiếp từ ảnh trang (kết
+  quả chính), đồng thời OCR chạy nền cho cùng trang; xong thì ĐỐI CHIẾU
+  hai bản — chỗ nào số liệu (số hiệu, ngày tháng, số tiền, số lượng) hai
+  bên đọc khác nhau sẽ hiện cảnh báo gắn cờ đúng trang và đúng con số
+  để kiểm tra trên bản gốc trước khi ban hành. Chữ thường khác dấu
+  (điểm yếu quen thuộc của OCR) không gắn cờ để tránh báo nhiễu.
+- Trang scan + CHƯA có khóa: quét OCR như cũ, kèm nhắc dán khóa để dùng AI.
+- Trang nào AI lỗi vẫn tự rơi OCR cho trang đó (kết quả OCR nền dùng
+  luôn, không quét lại lần hai).
+
+Kiểm chứng: test đơn vị bộ đối chiếu 10/10 (sai số quyết định/số tiền
+thì gắn cờ, khác dấu chữ thường thì không); kiểm tự động trên trình
+duyệt: không còn nút chọn, chưa khóa OCR đủ 3/3 trang, khóa giả (AI lỗi)
+rơi OCR đủ 3/3 trang kèm cảnh báo; các bộ test cũ (PDF thật, AI dự
+phòng, giao diện, chuẩn hoá, offline PWA) đều đạt lại. Nhánh AI thật +
+đối chiếu chỉ chạy được trên máy có mạng tới Google (môi trường kiểm
+thử bị chặn) — thầy thử bằng một file scan thật sẽ thấy cảnh báo đối
+chiếu nếu có số liệu đọc khác nhau.
