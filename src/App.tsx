@@ -30,7 +30,7 @@ import { runAI, getGeminiKey, setGeminiKey, hasGeminiKey, checkAiConnection } fr
 // utils/docxExport, mammoth) KHÔNG nạp khi mở app; mỗi thao tác tự nạp
 // module của nó bằng import() động ngay trước khi dùng. Ở đây chỉ giữ
 // import KIỂU (type) — bị xoá lúc biên dịch, không kéo theo mã thật.
-import type { PdfConvertResult, ScanEngine } from "./services/pdf";
+import type { PdfConvertResult } from "./services/pdf";
 import type { SheetInfo } from "./utils/spreadsheet";
 import type { DocBlock, PdfClassification } from "./utils/pdfStructure";
 import {
@@ -125,9 +125,8 @@ export default function App() {
   const [pdfWarnings, setPdfWarnings] = useState<string[]>([]);
   const [pdfOcrConfidence, setPdfOcrConfidence] = useState<number | undefined>(undefined);
   const [pdfAiPages, setPdfAiPages] = useState<number | undefined>(undefined);
-  // Cách đọc trang scan: "ai" = AI đánh lại (chuẩn cao, cần khóa Gemini);
-  // "ocr" = quét OCR trên máy (offline). Mặc định AI theo yêu cầu của Hải.
-  const [scanEngine, setScanEngine] = useState<ScanEngine>("ai");
+  // Cách đọc trang scan TỰ ĐỘNG (không còn nút chọn — yêu cầu của Hải
+  // 22/10): có khóa Gemini thì AI đánh lại + đối chiếu OCR, chưa có thì OCR.
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [geminiKeySaved, setGeminiKeySaved] = useState<boolean>(() => hasGeminiKey());
   const [aiChecking, setAiChecking] = useState(false);
@@ -318,7 +317,7 @@ export default function App() {
 
   // ---------------- Mục 1: PDF → Word ----------------
   const handlePdfFile = async (file: File) => {
-    // Không chặn cứng khi chọn AI mà chưa có khóa: trang có lớp chữ vẫn đọc
+    // Chưa có khóa Gemini cũng không chặn: trang có lớp chữ vẫn đọc
     // thẳng bình thường; riêng trang scan sẽ tự rơi xuống OCR kèm cảnh báo
     // rõ trong panel kết quả (xử lý trong services/pdf.ts).
     setIsConverting(true);
@@ -330,8 +329,7 @@ export default function App() {
         file,
         (stage, page, total) => {
           setConvertProgress(`${stage} ${page}/${total}...`);
-        },
-        { scanEngine }
+        }
       );
       if (result.info.kind === "empty" || result.blocks.length === 0) {
         showNotice("error", "Không trích được nội dung từ PDF này. File có thể bị hỏng, đặt mật khẩu, hoặc là ảnh scan quá mờ để OCR.");
@@ -381,16 +379,14 @@ export default function App() {
     setIsConverting(true);
     setConvertProgress("Đang trích bảng từ PDF...");
     try {
-      // Dùng chung cách đọc trang scan với mục PDF → Word; chưa có khóa
-      // Gemini thì công cụ này tự quét OCR (không chặn việc trích bảng).
-      const engine: ScanEngine = scanEngine === "ai" && !hasGeminiKey() ? "ocr" : scanEngine;
+      // Dùng chung cách đọc trang scan tự động với mục PDF → Word
+      // (có khóa Gemini thì AI đánh lại, chưa có thì quét OCR).
       const { convertPdfFile } = await import("./services/pdf");
       const result: PdfConvertResult = await convertPdfFile(
         file,
         (stage, page, total) => {
           setConvertProgress(`${stage} ${page}/${total}...`);
-        },
-        { scanEngine: engine }
+        }
       );
       if (result.blocks.length === 0) {
         showNotice("error", "Không trích được nội dung từ PDF này.");
@@ -589,8 +585,6 @@ export default function App() {
               uploadHint={uploadHint}
               onPick={onPick}
               handlePdfFile={handlePdfFile}
-              scanEngine={scanEngine}
-              setScanEngine={setScanEngine}
               geminiKeySaved={geminiKeySaved}
               setGeminiKeySaved={setGeminiKeySaved}
               geminiKeyInput={geminiKeyInput}
