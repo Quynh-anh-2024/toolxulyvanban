@@ -189,3 +189,43 @@ lặp stream đúng kiểu mới nên PDF nào cũng chết trên Safari cũ.
 - Kiểm chứng: unit 15/15 (thêm test hồi quy trang scan), e2e 7/7, Excel
   5/5, test trình duyệt PDF thật đạt (kể cả luồng Excel mới), UI smoke,
   chuẩn hoá Word, PWA offline đều đạt.
+
+## Cập nhật 22/10/2026 (chiều) — Hai cách đọc trang scan: AI ĐÁNH LẠI / QUÉT OCR
+
+Theo yêu cầu: đẩy 1 file PDF lên thì trang scan (không có lớp chữ) được
+đọc bằng MỘT trong hai cách, chọn ngay trong mục "PDF → Word":
+
+1. **AI đánh lại (mặc định, khuyên dùng cho bản scan):** app gửi ẢNH trang
+   cho Gemini (model gemini-3.8-flash) chép lại từng chữ như người đánh
+   máy, rồi dựng cấu trúc (đầu văn bản 36/64, tiêu đề, bảng markdown →
+   bảng thật, Nơi nhận, khối ký) bằng `src/utils/aiText.ts`.
+   - Đo thật trên CV 5095/BGDĐT trang 1 (bản scan cổng ký số): AI chép
+     đúng **100,0%** số từ so với bản chép tay kiểm chứng; Tesseract chỉ
+     đạt ~89%. Đây là mức tương đương ABBYY FineReader (99,8%).
+   - Cần: internet + **khóa Gemini của chính người dùng** (miễn phí tại
+     aistudio.google.com/apikey), dán MỘT lần vào ô "Khóa Gemini" trong
+     app. Khóa chỉ lưu ở localStorage của trình duyệt trên máy đó —
+     KHÔNG viết vào mã nguồn (khóa OpenRouter cũ viết cứng trong
+     `src/services/ai.ts` đã bị OpenRouter thu hồi — 401 "User not
+     found" — vì repo công khai; các tính năng AI chữ của mục Word & AI
+     nay tự dùng khóa Gemini này làm đường dự phòng).
+   - Trang nào AI lỗi (mất mạng/hết lượt) thì app TỰ rơi xuống quét OCR
+     cho trang đó và ghi cảnh báo rõ trong panel kết quả — không treo,
+     không mất cả file.
+   - Trang có lớp chữ LUÔN đọc thẳng lớp chữ ở cả hai chế độ.
+2. **Quét OCR trên máy:** Tesseract như trước — offline, không cần khóa,
+   trần ~89–91% với scan cổng (sai dấu ở chỗ mờ là khó tránh).
+
+Công cụ "Trích bảng từ PDF" ở mục Excel dùng chung cách đọc đã chọn ở
+mục PDF → Word (chưa có khóa thì tự quét OCR).
+
+Kèm theo: **vá lỗi xem trước trên điện thoại** — trang A4 bị cắt mất mép
+trái trong khung cuộn (chữ đầu dòng biến mất như ảnh chụp của thầy Hải);
+đã bọc trang trong lớp căn giữa đúng cách, kiểm thử ở khổ iPhone: cuộn
+tới được cả hai mép.
+
+Kiểm chứng đợt này: unit pdf-structure 15/15, ai-text 14/14, Excel 5/5,
+e2e 7/7, trình duyệt + PDF thật (đường OCR) đạt, UI smoke/chuẩn hoá
+Word/PWA offline đạt; chuỗi AI: đo qua API 100% → dựng blocks giữ
+100,0% → test trình duyệt `tests/browser-ai-test.py` (nhánh dự phòng
+đạt; nhánh AI cần mạng tới Google không bị chặn như trên máy người dùng).
