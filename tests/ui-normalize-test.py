@@ -25,7 +25,10 @@ def main() -> int:
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto("http://localhost:3000/", wait_until="networkidle")
-        page.set_input_files("input[type=file]", str(FIXTURE))
+        # Từ 22/10/2026: file Word nằm ở mục riêng "Word & AI" — phải mở
+        # đúng mục rồi nạp vào đúng ô tải của mục đó.
+        page.click("text=Word & AI")
+        page.set_input_files("#wordInput", str(FIXTURE))
         # Chờ bản xem trước có nội dung văn bản
         page.wait_for_function(
             "() => document.body.innerText.includes('THÔNG BÁO') || document.body.innerText.includes('thông báo')",
