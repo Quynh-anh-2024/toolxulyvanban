@@ -254,3 +254,29 @@ Kiểm chứng: A-check tự động trên trình duyệt (khổ iPhone) đạt 
 A3 — trang vừa màn hình đo đúng không tràn ngang, chế độ 100% trả đúng
 794px, file PDF hỏng hiện thanh báo đỏ và không còn hộp thoại nào; test
 giao diện + chuẩn hoá Word đạt; chụp màn hình đối chiếu trực quan đạt.
+
+## Cập nhật 22/10/2026 (tối muộn) — Mục B: cấu trúc cốt lõi
+
+- B5: App.tsx tách thành file riêng cho từng mục: src/sections/PdfSection
+  .tsx, ExcelSection.tsx, WordSection.tsx; khung xem trước ở
+  src/components/PreviewPane.tsx, thanh báo ở NoticeBar.tsx, khối căn lề
+  ở MarginConfig.tsx. State + hàm xử lý vẫn tập trung ở App và truyền
+  xuống qua props — sửa một mục không đụng mục khác. App.tsx còn ~700
+  dòng (trước ~1.000).
+- B6: nút "Kiểm tra" cạnh dòng "Đã lưu khóa Gemini": gọi thử AI một câu
+  tối thiểu và báo ngay kết quả bằng thanh báo (khóa sống/model nào đáp,
+  hoặc lỗi tiếng Việt dễ hiểu). Lỗi mạng thô của trình duyệt ("Failed to
+  fetch") đã được dịch sang tiếng Việt trong services/ai.ts.
+- B7: trang scan ở chế độ AI được gom lại và AI đánh lại SONG SONG tối
+  đa 3 trang cùng lúc (có báo tiến độ "đã xong x/y trang"); trang nào AI
+  lỗi vẫn tự rơi OCR cho trang đó, phần OCR dự phòng chạy tuần tự để
+  không nặng máy.
+- B8: gói mở app giảm từ ~2.320KB xuống ~430KB: các phần nặng (đọc PDF,
+  Excel, xuất Word, đọc .docx) chỉ nạp khi dùng tới; app tự nạp trước
+  lúc trình duyệt rảnh để PWA vẫn chạy offline trọn vẹn sau lần mở có
+  mạng đầu tiên (đã kiểm lại bằng test offline).
+
+Kiểm chứng: mọi bộ test cũ đều đạt lại (unit 15, AI-text 14, Excel 5,
+đầu-cuối 7, PDF thật trên trình duyệt, AI dự phòng, giao diện, chuẩn hoá
+Word, kiểm A1–A3, offline PWA) + 2 kiểm mới cho B6/B7 (nút Kiểm tra ra
+đúng thanh báo; scan 3 trang rơi OCR đủ 3 trang qua đường song song).
