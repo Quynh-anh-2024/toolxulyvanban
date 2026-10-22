@@ -21,6 +21,13 @@ export interface PdfTextItem {
   bold: boolean;
   italic: boolean;
   fontName?: string;
+  /** Độ tin cậy OCR 0–100 (chỉ trang OCR mới có). */
+  conf?: number;
+  /** Số thứ tự DÒNG do Tesseract phân đoạn (chỉ trang OCR) — tầng cấu trúc
+   * dùng nguyên, không gom dòng lại theo tọa độ. */
+  lineId?: number;
+  /** Số thứ tự ĐOẠN do Tesseract phân đoạn (chỉ trang OCR). */
+  paraId?: number;
 }
 
 export interface PdfPageInput {
@@ -248,6 +255,8 @@ export interface TextLine {
   fontSize: number;
   bold: boolean;
   pageNumber: number;
+  /** Trang OCR: dòng này mở đầu một đoạn mới theo phân đoạn của Tesseract. */
+  paraBreakBefore?: boolean;
 }
 
 interface RawLine {
@@ -394,6 +403,188 @@ function mergeRuns(items: PdfTextItem[]): DocRun[] {
 
 export function pageToLines(page: PdfPageInput): TextLine[] {
   return itemsToRawLines(page.items).map((raw) => buildLine(raw, page.pageNumber));
+}
+
+/* ------------------------------------------------------------------ */
+/* Trang OCR: dựng dòng theo phân đoạn của Tesseract                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ngưỡng tách segment cho trang OCR (× cỡ chữ): chỉ khe THẬT RỘNG mới tách
+ * (khe giữa 2 cột đầu trang, khe cột của bảng thật). Khe giữa các từ trong
+ * đoạn căn đều của bản scan không bao giờ tới mức này. Dùng ngưỡng của
+ * trang có lớp chữ (~1,05×) cho trang scan đã từng xé đoạn văn thành nhiều
+ * segment → máy dựng bảng tưởng nhầm là bảng dữ liệu → chữ bị xáo trộn
+ * thứ tự đọc và bị nuốt mất ở khâu gán cột. Đó là "vấn đề lớn" của cơ chế
+ * quét cũ: Tesseract đọc đúng ~89% nhưng bản Word ra lò không dùng được.
+ */
+const OCR_SEGMENT_GAP_RATIO = 2.4;
+
+function buildOcrLine(items: PdfTextItem[], pageNumber: number, paraBreakBefore: boolean): TextLine {
+  const sorted = [...items].sort((a, b) => a.x - b.x);
+  const fontSize = sorted.reduce((m, it) => Math.max(m, it.fontSize), 0) || 12;
+  const buckets: PdfTextItem[][] = [];
+  let bucket: PdfTextItem[] = [];
+  let prevEnd = 0;
+  for (const item of sorted) {
+    if (bucket.length > 0 && item.x - prevEnd > fontSize * OCR_SEGMENT_GAP_RATIO) {
+      buckets.push(bucket);
+      bucket = [];
+    }
+    bucket.push(item);
+    prevEnd = item.x + item.width;
+  }
+  if (bucket.length) buckets.push(bucket);
+  const segments: LineSegment[] = buckets.map((b) => ({
+    runs: mergeRuns(b),
+    xStart: b[0].x,
+    xEnd: b[b.length - 1].x + b[b.length - 1].width,
+    text: cleanPdfText(b.map((x) => x.text).join("")),
+  }));
+  const allRuns: DocRun[] = [];
+  for (const seg of segments) {
+    for (const r of seg.runs) {
+      const copy = { ...r };
+      const prev = allRuns[allRuns.length - 1];
+      if (prev && !/\s$/.test(prev.text) && !/^\s/.test(copy.text)) prev.text += " ";
+      allRuns.push(copy);
+    }
+  }
+  return {
+    segments,
+    runs: allRuns,
+    text: cleanPdfText(segments.map((s) => s.text).join(" ")),
+    xStart: sorted[0]?.x ?? 0,
+    xEnd: Math.max(...sorted.map((it) => it.x + it.width), 0),
+    y: Math.min(...sorted.map((it) => it.y)),
+    fontSize,
+    bold: false,
+    pageNumber,
+    paraBreakBefore,
+  };
+}
+
+/**
+ * Dựng dòng cho trang OCR từ lineId/paraId mà Tesseract đã phân đoạn:
+ * giữ nguyên dòng và ranh giới đoạn của Tesseract (nó phân đoạn trang scan
+ * tốt hơn nhiều so với gom lại theo tọa độ y — hộp từ OCR rung vài point).
+ * Các dòng được sắp lại theo y cho đúng thứ tự đọc của trang 1 cột.
+ */
+/** Dựng lại runs/text của một dòng OCR khi chỉ giữ một phần segment của nó. */
+function rebuildLineSegments(line: TextLine, segs: LineSegment[]): TextLine {
+  const allRuns: DocRun[] = [];
+  for (const seg of segs) {
+    for (const r of seg.runs) {
+      const copy = { ...r };
+      const prev = allRuns[allRuns.length - 1];
+      if (prev && !/\s$/.test(prev.text) && !/^\s/.test(copy.text)) prev.text += " ";
+      allRuns.push(copy);
+    }
+  }
+  return {
+    ...line,
+    segments: segs,
+    runs: allRuns,
+    text: cleanPdfText(segs.map((s) => s.text).join(" ")),
+    xEnd: Math.max(...segs.map((s) => s.xEnd)),
+  };
+}
+
+/**
+ * Vùng cuối trang kiểu hành chính VN: cột trái "Nơi nhận", cột phải khối
+ * chữ ký — Tesseract hay gộp 2 cột thành một dòng/đoạn, chữ ký chen vào
+ * giữa danh sách nơi nhận. Từ dòng "Nơi nhận" trở xuống: tách segment bên
+ * phải (x ≥ 55% bề rộng trang) ra thành một nhóm dòng riêng đặt SAU toàn
+ * bộ cột trái — đúng thứ tự đọc của văn bản gốc.
+ */
+function partitionRecipientZone(lines: TextLine[], pageWidth: number): TextLine[] {
+  const markerIdx = lines.findIndex((l) => normalizeViText(l.text).startsWith("NOI NHAN"));
+  if (markerIdx < 0) return lines;
+  const cutX = pageWidth * 0.55;
+  const kept: TextLine[] = [];
+  const rightLines: TextLine[] = [];
+  lines.forEach((l, idx) => {
+    if (idx < markerIdx) {
+      kept.push(l);
+      return;
+    }
+    const leftSegs = l.segments.filter((s) => s.xStart < cutX);
+    const rightSegs = l.segments.filter((s) => s.xStart >= cutX);
+    if (rightSegs.length === 0) {
+      kept.push(l);
+      return;
+    }
+    if (leftSegs.length > 0) kept.push(rebuildLineSegments(l, leftSegs));
+    for (const seg of rightSegs) {
+      rightLines.push({
+        segments: [seg],
+        runs: seg.runs,
+        text: seg.text,
+        xStart: seg.xStart,
+        xEnd: seg.xEnd,
+        y: l.y + rightLines.length * 0.01,
+        fontSize: l.fontSize,
+        bold: false,
+        pageNumber: l.pageNumber,
+        paraBreakBefore: rightLines.length === 0,
+      });
+    }
+  });
+  return rightLines.length > 0 ? [...kept, ...rightLines] : lines;
+}
+
+export function ocrPageToLines(page: PdfPageInput): TextLine[] {
+  const withIds = page.items.filter(
+    (it) => it.text && it.text.trim().length > 0 && typeof it.lineId === "number"
+  );
+  if (withIds.length === 0) {
+    // Dự phòng (dữ liệu OCR không gắn lineId): gom dòng theo y như cũ nhưng
+    // mỗi dòng chỉ 1 segment — vẫn tránh được máy tách cột nuốt chữ.
+    return itemsToRawLines(page.items).map((raw) => buildOcrLine(raw.items, page.pageNumber, false));
+  }
+  const byLine = new Map<number, PdfTextItem[]>();
+  for (const it of withIds) {
+    const arr = byLine.get(it.lineId!) || [];
+    arr.push(it);
+    byLine.set(it.lineId!, arr);
+  }
+  const groups = [...byLine.values()];
+  groups.sort((a, b) => Math.min(...a.map((i) => i.y)) - Math.min(...b.map((i) => i.y)));
+
+  // Tách dòng bị Tesseract GỘP 2 cột ở đầu trang: nếu cụm quốc hiệu
+  // "CỘNG HÒA…" bắt đầu ở giữa dòng (trước nó là khe rộng), cắt dòng tại
+  // từ đó — nửa trái là tên cơ quan ban hành, nửa phải là quốc hiệu. Không
+  // tách, extractAdminHeader sẽ nuốt mất tên cơ quan vào ô quốc hiệu (đã
+  // gặp thật trên CV 5095: ô trái chỉ còn mảnh rác "Ì").
+  const splitGroups: PdfTextItem[][] = [];
+  for (const g of groups) {
+    const minY = Math.min(...g.map((i) => i.y));
+    const sorted = [...g].sort((a, b) => a.x - b.x);
+    const fontSize = sorted.reduce((m, it) => Math.max(m, it.fontSize), 0) || 12;
+    let cut = -1;
+    if (minY < page.height * 0.25) {
+      for (let k = 1; k + 1 < sorted.length; k++) {
+        if (normalizeViText(sorted[k].text) === "CONG" && normalizeViText(sorted[k + 1].text) === "HOA") {
+          const gap = sorted[k].x - (sorted[k - 1].x + sorted[k - 1].width);
+          if (gap > fontSize * 1.0) {
+            cut = k;
+            break;
+          }
+        }
+      }
+    }
+    if (cut > 0) splitGroups.push(sorted.slice(0, cut), sorted.slice(cut));
+    else splitGroups.push(g);
+  }
+
+  let prevPara: number | undefined;
+  const built = splitGroups.map((g) => {
+    const para = g[0].paraId;
+    const brk = prevPara !== undefined && para !== undefined && para !== prevPara;
+    if (para !== undefined) prevPara = para;
+    return buildOcrLine(g, page.pageNumber, brk);
+  });
+  return partitionRecipientZone(built, page.width);
 }
 
 /* ------------------------------------------------------------------ */
@@ -737,11 +928,158 @@ export function classifyPdf(pages: PdfPageInput[]): PdfClassification {
   return { kind, totalPages: pages.length, textPages, ocrPages, totalChars, label };
 }
 
+/* ------------------------------------------------------------------ */
+/* Trang OCR → khối: đoạn theo phân đoạn Tesseract + bảng thận trọng   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Vùng bảng THẬT trên trang scan: ≥4 dòng liên tiếp, mỗi dòng có SỐ segment
+ * bằng nhau (≥3 cột) và vị trí bắt đầu từng cột khớp nhau trong 14pt. Điều
+ * kiện cố ý chặt: thà để bảng scan ra dòng chữ đúng thứ tự còn hơn nhận
+ * nhầm đoạn văn thành bảng rồi xáo trộn/nuốt chữ như cơ chế quét cũ.
+ */
+function ocrTableRegionAt(lines: TextLine[], start: number): { end: number } | null {
+  const segCount = lines[start].segments.length;
+  if (segCount < 3) return null;
+  let end = start;
+  while (end + 1 < lines.length) {
+    const next = lines[end + 1];
+    if (next.segments.length !== segCount) break;
+    if (next.y - lines[end].y > next.fontSize * 2.6) break;
+    end++;
+  }
+  if (end - start + 1 < 4) return null;
+  const region = lines.slice(start, end + 1);
+  for (let c = 0; c < segCount; c++) {
+    const starts = region.map((l) => l.segments[c].xStart);
+    if (Math.max(...starts) - Math.min(...starts) > 14) return null;
+  }
+  return { end };
+}
+
+function ocrLinesToTable(lines: TextLine[]): DocBlock {
+  const colCount = lines[0].segments.length;
+  const rows: DocRun[][][][] = lines.map((line) => line.segments.map((seg) => [seg.runs]));
+  const spanStart = Math.min(...lines.map((l) => l.segments[0].xStart));
+  const spanEnd = Math.max(...lines.map((l) => l.segments[colCount - 1].xEnd));
+  const span = Math.max(1, spanEnd - spanStart);
+  const colWidths: number[] = [];
+  for (let c = 0; c < colCount; c++) {
+    const start = Math.min(...lines.map((l) => l.segments[c].xStart));
+    const nextStart =
+      c + 1 < colCount ? Math.min(...lines.map((l) => l.segments[c + 1].xStart)) : spanEnd;
+    colWidths.push(Math.max(4, Math.round(((nextStart - start) / span) * 100)));
+  }
+  return { kind: "table", rows, role: tableRole(lines), colWidths };
+}
+
+/**
+ * Dựng khối cho MỘT trang scan. Khác hẳn đường trang có lớp chữ (giữ
+ * nguyên ở pdfPagesToBlocks): đoạn văn đi theo ranh giới đoạn của
+ * Tesseract, không qua máy tách cột/gán cột — chữ được giữ đủ, đúng thứ
+ * tự đọc; bảng chỉ dựng khi có bằng chứng cột rất mạnh (ocrTableRegionAt).
+ */
+export function ocrPageBlocks(
+  page: PdfPageInput,
+  pageIdx: number,
+  titleConsumed: boolean
+): { blocks: DocBlock[]; titleConsumed: boolean } {
+  const blocks: DocBlock[] = [];
+  const lines = ocrPageToLines(page).filter((l) => l.text.length > 0);
+  let startIdx = 0;
+
+  if (pageIdx === 0 && lines.length > 0) {
+    const header = extractAdminHeader(lines, page.width);
+    if (header) {
+      blocks.push(header.block);
+      startIdx = header.consumedLines;
+    }
+  }
+  const content = lines.slice(startIdx);
+
+  let paraLines: TextLine[] = [];
+  const flushParagraph = () => {
+    if (paraLines.length === 0) return;
+    let runs: DocRun[] = [];
+    paraLines.forEach((l) => (runs = mergeLineIntoRuns(runs, l)));
+    const first = paraLines[0];
+    const text = runs.map((r) => r.text).join("");
+    const norm = normalizeViText(text);
+    let role: BlockRole = "body";
+    let align: "left" | "center" | "right" | "justify" = "justify";
+    const centered = isCentered(first, page.width) && paraLines.length <= 3;
+
+    if (!titleConsumed && pageIdx === 0 && centered && DOC_TITLES.some((t) => norm === t || norm.startsWith(t + " "))) {
+      role = "title";
+      align = "center";
+      titleConsumed = true;
+    } else if (titleConsumed && centered && paraLines.length <= 2 && blocks.length > 0 && (blocks[blocks.length - 1] as any).role === "title") {
+      role = "subtitle";
+      align = "center";
+    } else if (HEADING_RE.test(text.trim()) && (isAllCaps(text) || /^[IVXLCDM]/.test(text.trim()) || paraLines.length === 1)) {
+      // OCR không cho biết đậm/nghiêng — nới điều kiện mục so với trang có
+      // lớp chữ: đoạn 1 dòng đánh số/viết hoa toàn bộ được coi là mục.
+      role = "heading";
+      align = "left";
+    } else if (/^Nơi nhận/i.test(text.trim())) {
+      role = "recipient";
+      align = "left";
+    } else if (centered && isAllCaps(text) && paraLines.length <= 2) {
+      align = "center";
+    } else if (first.xStart > page.width * 0.52 && paraLines.length <= 3) {
+      align = "right";
+    }
+    blocks.push({
+      kind: "paragraph",
+      runs,
+      align,
+      role,
+      fontSize: first.fontSize,
+      firstLineIndent: role === "body",
+    });
+    paraLines = [];
+  };
+
+  let i = 0;
+  while (i < content.length) {
+    const region = ocrTableRegionAt(content, i);
+    if (region) {
+      flushParagraph();
+      blocks.push(ocrLinesToTable(content.slice(i, region.end + 1)));
+      i = region.end + 1;
+      continue;
+    }
+    const line = content[i];
+    if (paraLines.length > 0) {
+      const prev = paraLines[paraLines.length - 1];
+      const bigGap = line.y - prev.y > prev.fontSize * 2.1;
+      if (line.paraBreakBefore || bigGap || HEADING_RE.test(line.text.trim())) {
+        flushParagraph();
+      }
+    }
+    paraLines.push(line);
+    i++;
+  }
+  flushParagraph();
+
+  page.imageDataUrls?.forEach((url, k) =>
+    blocks.push({ kind: "image", dataUrl: url, width: page.imageSizes?.[k]?.width || 600, height: page.imageSizes?.[k]?.height || 400 })
+  );
+  return { blocks, titleConsumed };
+}
+
 export function pdfPagesToBlocks(pages: PdfPageInput[]): DocBlock[] {
   const blocks: DocBlock[] = [];
   let titleConsumed = false;
 
   pages.forEach((page, pageIdx) => {
+    // Trang scan đi đường riêng (giữ cấu trúc của Tesseract) — xem ocrPageBlocks.
+    if (page.source === "ocr") {
+      const res = ocrPageBlocks(page, pageIdx, titleConsumed);
+      blocks.push(...res.blocks);
+      titleConsumed = res.titleConsumed;
+      return;
+    }
     const lines = pageToLines(page).filter((l) => l.text.length > 0);
     let startIdx = 0;
 
