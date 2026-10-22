@@ -19,8 +19,8 @@ import {
 } from "lucide-react";
 
 import { cn } from "./lib/utils";
-import { runAI } from "./services/ai";
-import { convertPdfFile, type PdfConvertResult } from "./services/pdf";
+import { runAI, getGeminiKey, setGeminiKey, hasGeminiKey } from "./services/ai";
+import { convertPdfFile, type PdfConvertResult, type ScanEngine } from "./services/pdf";
 import { convertExcelFile } from "./services/excel";
 import { exportBlocksTablesToExcel } from "./services/excel";
 import { exportBlocksToWord } from "./utils/docxExport";
@@ -131,6 +131,12 @@ export default function App() {
   const [pdfInfo, setPdfInfo] = useState<PdfClassification | null>(null);
   const [pdfWarnings, setPdfWarnings] = useState<string[]>([]);
   const [pdfOcrConfidence, setPdfOcrConfidence] = useState<number | undefined>(undefined);
+  const [pdfAiPages, setPdfAiPages] = useState<number | undefined>(undefined);
+  // Cách đọc trang scan: "ai" = AI đánh lại (chuẩn cao, cần khóa Gemini);
+  // "ocr" = quét OCR trên máy (offline). Mặc định AI theo yêu cầu của Hải.
+  const [scanEngine, setScanEngine] = useState<ScanEngine>("ai");
+  const [geminiKeyInput, setGeminiKeyInput] = useState("");
+  const [geminiKeySaved, setGeminiKeySaved] = useState<boolean>(() => hasGeminiKey());
 
   const [excelBlocks, setExcelBlocks] = useState<DocBlock[] | null>(null);
   const [excelSheets, setExcelSheets] = useState<SheetInfo[] | null>(null);
@@ -237,12 +243,20 @@ export default function App() {
 
   // ---------------- Mục 1: PDF → Word ----------------
   const handlePdfFile = async (file: File) => {
+    // Không chặn cứng khi chọn AI mà chưa có khóa: trang có lớp chữ vẫn đọc
+    // thẳng bình thường; riêng trang scan sẽ tự rơi xuống OCR kèm cảnh báo
+    // rõ trong panel kết quả (xử lý trong services/pdf.ts).
     setIsConverting(true);
     setConvertProgress("Đang mở file PDF...");
+    setPdfAiPages(undefined);
     try {
-      const result: PdfConvertResult = await convertPdfFile(file, (stage, page, total) => {
-        setConvertProgress(`${stage} ${page}/${total}...`);
-      });
+      const result: PdfConvertResult = await convertPdfFile(
+        file,
+        (stage, page, total) => {
+          setConvertProgress(`${stage} ${page}/${total}...`);
+        },
+        { scanEngine }
+      );
       if (result.info.kind === "empty" || result.blocks.length === 0) {
         alert("Không trích được nội dung từ PDF này. File có thể bị hỏng, đặt mật khẩu, hoặc là ảnh scan quá mờ để OCR.");
         setFileStatus("Lỗi: không đọc được PDF");
@@ -253,6 +267,7 @@ export default function App() {
       setPdfInfo(result.info);
       setPdfWarnings(result.warnings);
       setPdfOcrConfidence(result.ocrConfidence);
+      setPdfAiPages(result.aiPages);
       loadConverted(result.html, result.rawText, file.name.replace(/\.pdf$/i, ""));
     } catch (error: any) {
       alert(`Không thể chuyển đổi PDF này: ${error?.message || "lỗi không xác định"}. Nếu file đặt mật khẩu, hãy gỡ mật khẩu rồi thử lại.`);
@@ -288,9 +303,16 @@ export default function App() {
     setIsConverting(true);
     setConvertProgress("Đang trích bảng từ PDF...");
     try {
-      const result: PdfConvertResult = await convertPdfFile(file, (stage, page, total) => {
-        setConvertProgress(`${stage} ${page}/${total}...`);
-      });
+      // Dùng chung cách đọc trang scan với mục PDF → Word; chưa có khóa
+      // Gemini thì công cụ này tự quét OCR (không chặn việc trích bảng).
+      const engine: ScanEngine = scanEngine === "ai" && !hasGeminiKey() ? "ocr" : scanEngine;
+      const result: PdfConvertResult = await convertPdfFile(
+        file,
+        (stage, page, total) => {
+          setConvertProgress(`${stage} ${page}/${total}...`);
+        },
+        { scanEngine: engine }
+      );
       if (result.blocks.length === 0) {
         alert("Không trích được nội dung từ PDF này.");
         return;
@@ -488,16 +510,48 @@ export default function App() {
               <section className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                 <h2 className="text-base font-semibold mb-3 text-blue-700">Chuyển PDF sang Word</h2>
                 <label htmlFor="fileInput" className="cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 transition-colors rounded-lg p-8 flex flex-col items-center">
-                  {uploadHint("Tải lên file PDF", "Có lớp chữ đọc thẳng · bản scan tự OCR tiếng Việt")}
+                  {uploadHint("Tải lên file PDF", "Có lớp chữ đọc thẳng · bản scan: AI đánh lại hoặc quét OCR (chọn ở dưới)")}
                 </label>
                 <input type="file" id="fileInput" accept=".pdf" className="hidden" onChange={onPick((f) => void handlePdfFile(f))} />
+                <div className="mt-4 text-left">
+                  <div className="text-xs font-medium text-slate-600 mb-2">Cách đọc trang scan (trang không có lớp chữ):</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setScanEngine("ai")} className={cn("rounded-lg border p-3 text-left transition-colors", scanEngine === "ai" ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-slate-300 bg-white hover:border-blue-400")}>
+                      <div className="text-sm font-semibold text-blue-800">1 · AI đánh lại <span className="ml-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium text-white">Khuyên dùng</span></div>
+                      <p className="mt-1 text-xs text-slate-600">AI nhìn ảnh trang và chép lại từng chữ — độ chính xác như ABBYY, dấu tiếng Việt chuẩn. Cần internet + khóa Gemini. Trang có lớp chữ vẫn đọc thẳng lớp chữ.</p>
+                    </button>
+                    <button type="button" onClick={() => setScanEngine("ocr")} className={cn("rounded-lg border p-3 text-left transition-colors", scanEngine === "ocr" ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-slate-300 bg-white hover:border-blue-400")}>
+                      <div className="text-sm font-semibold text-slate-700">2 · Quét OCR trên máy</div>
+                      <p className="mt-1 text-xs text-slate-600">Quét ngay trên máy, không cần mạng, không cần khóa. Bản scan mờ/nghiêng có thể sai dấu — nên soát lại.</p>
+                    </button>
+                  </div>
+                  {scanEngine === "ai" && (
+                    <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
+                      {geminiKeySaved ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-slate-700">Đã lưu khóa Gemini trên máy này — AI đánh lại sẵn sàng.</span>
+                          <button type="button" className="shrink-0 text-xs font-medium text-blue-700 underline" onClick={() => { setGeminiKey(""); setGeminiKeySaved(false); }}>Xóa khóa</button>
+                        </div>
+                      ) : (
+                        <>
+                          <label className="block text-xs font-medium text-slate-700" htmlFor="geminiKeyInput">Khóa Gemini (miễn phí tại aistudio.google.com/apikey):</label>
+                          <div className="mt-1.5 flex gap-2">
+                            <input id="geminiKeyInput" type="password" value={geminiKeyInput} onChange={(e) => setGeminiKeyInput(e.target.value)} placeholder="Dán khóa Gemini của bạn vào đây" className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" autoComplete="off" />
+                            <button type="button" className="shrink-0 rounded bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800" onClick={() => { if (geminiKeyInput.trim()) { setGeminiKey(geminiKeyInput); setGeminiKeySaved(true); setGeminiKeyInput(""); } }}>Lưu khóa</button>
+                          </div>
+                          <p className="mt-1.5 text-[11px] text-slate-500">Khóa chỉ lưu trong trình duyệt trên máy này, không nằm trong mã nguồn, không gửi đi đâu ngoài Google AI. Dán một lần, dùng mãi.</p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {convertingLine}
                 {statusLine}
                 {pdfInfo && (
                   <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-slate-700 text-left">
                     <div className="font-medium text-blue-800 mb-1">Kết quả chuyển PDF → Word</div>
                     <div>Loại PDF: <b>{pdfInfo.label}</b></div>
-                    <div>Số trang: <b>{pdfInfo.totalPages}</b> · Trang có lớp chữ: <b>{pdfInfo.textPages}</b> · Trang OCR: <b>{pdfInfo.ocrPages}</b></div>
+                    <div>Số trang: <b>{pdfInfo.totalPages}</b> · Trang có lớp chữ: <b>{pdfInfo.textPages}</b>{pdfAiPages !== undefined && <> · Trang AI đánh lại: <b>{pdfAiPages}</b></>} · Trang OCR: <b>{pdfInfo.ocrPages}</b></div>
                     {pdfOcrConfidence !== undefined && <div>Độ tin cậy OCR trung bình: <b>{pdfOcrConfidence}%</b></div>}
                     {pdfWarnings.map((w, i) => (
                       <p key={i} className="mt-1.5 text-amber-700 flex gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> <span>{w}</span></p>
@@ -554,6 +608,7 @@ export default function App() {
                 <label htmlFor="pdfTableInput" className="cursor-pointer bg-slate-50 border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 transition-colors rounded-lg p-8 flex flex-col items-center">
                   {uploadHint("Tải lên file PDF có bảng", "Trích mọi bảng trong PDF thành các sheet Excel")}
                 </label>
+                <p className="mt-2 text-xs text-slate-500">Trang scan trong PDF này được đọc theo cách đã chọn ở mục <b>PDF → Word</b> (AI đánh lại hoặc quét OCR).</p>
                 <input type="file" id="pdfTableInput" accept=".pdf" className="hidden" onChange={onPick((f) => void handlePdfTablesFile(f))} />
                 {pdfTableBlocks && (
                   <div className="mt-3">
@@ -708,8 +763,15 @@ export default function App() {
               <CheckCircle2 className="w-3 h-3" /> {modeSummary}
             </p>
           </div>
-          <div className="flex-1 min-h-0 bg-slate-300 mx-4 md:mx-6 mb-4 md:mb-6 rounded-xl overflow-auto p-4 md:p-8">
-            <div className="mx-auto bg-white shadow-xl relative shrink-0" style={{ width: "794px", minHeight: "1123px" }}>
+          <div className="flex-1 min-h-0 bg-slate-300 mx-4 md:mx-6 mb-4 md:mb-6 rounded-xl overflow-auto">
+            {/* Bọc trang A4 trong lớp "w-max min-w-full flex justify-center":
+                trên điện thoại trang 794px rộng hơn màn hình — để mx-auto trực
+                tiếp trong khung cuộn sẽ làm mép TRÁI tràn ra vùng âm, không
+                cuộn tới được (chữ bị cắt đầu dòng như ảnh chụp 22/10). Lớp bọc
+                rộng bằng nội dung + căn giữa khi vừa khung thì cuộn được cả
+                2 phía. */}
+            <div className="min-w-full w-max flex justify-center p-4 md:p-8">
+            <div className="bg-white shadow-xl relative shrink-0" style={{ width: "794px", minHeight: "1123px" }}>
               <style>{`
                 .document-content {
                   box-sizing: border-box;
@@ -842,6 +904,7 @@ export default function App() {
               ) : (
                 <div ref={previewRef} className="document-content outline-none" dangerouslySetInnerHTML={{ __html: docHtml }} />
               )}
+            </div>
             </div>
           </div>
         </section>
