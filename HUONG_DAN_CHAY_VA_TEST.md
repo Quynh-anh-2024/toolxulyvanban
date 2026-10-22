@@ -229,3 +229,28 @@ e2e 7/7, trình duyệt + PDF thật (đường OCR) đạt, UI smoke/chuẩn ho
 Word/PWA offline đạt; chuỗi AI: đo qua API 100% → dựng blocks giữ
 100,0% → test trình duyệt `tests/browser-ai-test.py` (nhánh dự phòng
 đạt; nhánh AI cần mạng tới Google không bị chặn như trên máy người dùng).
+
+## Cập nhật 22/10/2026 (tối) — Gọn giao diện + các sửa ưu tiên mục A
+
+Theo yêu cầu của thầy Hải: giao diện KHÔNG còn đoạn văn giải thích ở bất
+kỳ mục nào (chỉ nhãn, nút, trạng thái); chỗ lấy khóa Gemini là link bấm
+được mở thẳng trang aistudio.google.com/apikey. Quy tắc này áp cho mọi
+app làm cho thầy từ nay.
+
+Các sửa ưu tiên (mục A trong bản phân tích chuyên gia 22/10):
+- A1: chọn cách đọc trang scan thu thành MỘT hàng chọn nhỏ "Trang scan:
+  [AI đánh lại | Quét OCR]" ngay dưới ô tải file; ô nhập khóa chỉ hiện
+  khi chọn AI mà chưa lưu khóa; đã lưu khóa thì chỉ còn một dòng chữ nhỏ.
+- A2: bản xem trước có nút "Vừa màn hình / 100%": chế độ vừa màn hình
+  thu nhỏ trang A4 theo bề rộng khung (điện thoại xem trọn trang, không
+  cuộn ngang); mặc định bật trên màn hình nhỏ.
+- A3: bỏ toàn bộ hộp thoại alert() — lỗi/cảnh báo/thành công hiện bằng
+  thanh báo trong trang ở cuối màn hình, phân màu đỏ/vàng/xanh, tự tắt
+  sau 7 giây hoặc bấm dấu ×.
+- A4: panel kết quả tách hai khối riêng: số liệu (nền xanh) và cảnh báo
+  (nền vàng riêng, dòng cảnh báo nặng hiện chữ đỏ).
+
+Kiểm chứng: A-check tự động trên trình duyệt (khổ iPhone) đạt cả A1/A2/
+A3 — trang vừa màn hình đo đúng không tràn ngang, chế độ 100% trả đúng
+794px, file PDF hỏng hiện thanh báo đỏ và không còn hộp thoại nào; test
+giao diện + chuẩn hoá Word đạt; chụp màn hình đối chiếu trực quan đạt.
