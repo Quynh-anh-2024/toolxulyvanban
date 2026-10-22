@@ -1,20 +1,17 @@
-// Mục 1 — PDF → Word: ô tải PDF, chọn cách đọc trang scan (AI đánh lại /
-// quét OCR), ô khóa Gemini và panel kết quả. Tách khỏi App.tsx (đợt B5)
-// để sửa mục này không đụng các mục khác; state + hàm xử lý vẫn ở App và
-// được truyền xuống qua props.
+// Mục 1 — PDF → Word: ô tải PDF, ô khóa Gemini và panel kết quả. Cách
+// đọc trang scan TỰ ĐỘNG (không còn nút chọn): có khóa thì AI đánh lại
+// kèm đối chiếu OCR, chưa có khóa thì quét OCR. Tách khỏi App.tsx (đợt
+// B5); state + hàm xử lý vẫn ở App và được truyền xuống qua props.
 import type { ChangeEvent, ReactNode } from "react";
 import { AlertTriangle, Save } from "lucide-react";
 import { cn } from "../lib/utils";
 import { setGeminiKey } from "../services/ai";
-import type { ScanEngine } from "../services/pdf";
 import type { DocBlock, PdfClassification } from "../utils/pdfStructure";
 
 export interface PdfSectionProps {
   uploadHint: (label: string) => ReactNode;
   onPick: (handler: (f: File) => void) => (event: ChangeEvent<HTMLInputElement>) => void;
   handlePdfFile: (file: File) => void;
-  scanEngine: ScanEngine;
-  setScanEngine: (engine: ScanEngine) => void;
   geminiKeySaved: boolean;
   setGeminiKeySaved: (saved: boolean) => void;
   geminiKeyInput: string;
@@ -34,7 +31,7 @@ export interface PdfSectionProps {
 
 export function PdfSection(props: PdfSectionProps) {
   const {
-    uploadHint, onPick, handlePdfFile, scanEngine, setScanEngine,
+    uploadHint, onPick, handlePdfFile,
     geminiKeySaved, setGeminiKeySaved, geminiKeyInput, setGeminiKeyInput,
     aiChecking, handleCheckAi, showNotice, convertingLine, statusLine,
     pdfInfo, pdfAiPages, pdfOcrConfidence, pdfWarnings, pdfBlocks,
@@ -48,23 +45,17 @@ export function PdfSection(props: PdfSectionProps) {
         {uploadHint("Tải lên file PDF")}
       </label>
       <input type="file" id="fileInput" accept=".pdf" className="hidden" onChange={onPick((f) => void handlePdfFile(f))} />
-      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-left">
-        <span className="text-xs font-medium text-slate-600">Trang scan:</span>
-        <div className="inline-flex overflow-hidden rounded-lg border border-slate-300">
-          <button type="button" onClick={() => setScanEngine("ai")} className={cn("px-3 py-1.5 text-sm font-medium transition-colors", scanEngine === "ai" ? "bg-blue-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50")}>AI đánh lại</button>
-          <button type="button" onClick={() => setScanEngine("ocr")} className={cn("border-l border-slate-300 px-3 py-1.5 text-sm font-medium transition-colors", scanEngine === "ocr" ? "bg-blue-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50")}>Quét OCR</button>
-        </div>
-        {scanEngine === "ai" && geminiKeySaved && (
-          <span className="ml-auto text-xs text-slate-500">
+      {geminiKeySaved ? (
+        <div className="mt-3 text-left">
+          <span className="text-xs text-slate-500">
             Đã lưu khóa Gemini ·{" "}
             <button type="button" disabled={aiChecking} className="font-medium text-blue-700 underline disabled:opacity-50" onClick={() => void handleCheckAi()}>{aiChecking ? "Đang kiểm tra…" : "Kiểm tra"}</button>
             {" "}·{" "}
             <button type="button" className="font-medium text-blue-700 underline" onClick={() => { setGeminiKey(""); setGeminiKeySaved(false); }}>Xóa</button>
           </span>
-        )}
-      </div>
-      {scanEngine === "ai" && !geminiKeySaved && (
-        <div className="mt-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-left">
+        </div>
+      ) : (
+        <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-left">
           <label className="block text-xs font-medium text-slate-700" htmlFor="geminiKeyInput">Khóa Gemini — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">bấm vào đây để lấy khóa miễn phí</a>:</label>
           <div className="mt-1.5 flex gap-2">
             <input id="geminiKeyInput" type="password" value={geminiKeyInput} onChange={(e) => setGeminiKeyInput(e.target.value)} placeholder="Dán khóa Gemini của bạn vào đây" className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" autoComplete="off" />
