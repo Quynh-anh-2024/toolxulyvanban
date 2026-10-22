@@ -39,7 +39,7 @@ function plainAiError(status: number, message: string): Error {
   return new Error(message || `Lỗi AI (${status}).`);
 }
 
-async function geminiGenerate(parts: unknown[]): Promise<string> {
+async function geminiGenerate(parts: unknown[]): Promise<{ text: string; model: string }> {
   const key = getGeminiKey();
   if (!key) {
     throw new Error("Chưa có khóa Gemini. Hãy dán khóa Gemini (miễn phí tại aistudio.google.com/apikey) vào ô khóa AI trước.");
@@ -76,10 +76,19 @@ async function geminiGenerate(parts: unknown[]): Promise<string> {
           .join("")
           .trim();
         if (!text) throw new Error("AI không trả về nội dung. Vui lòng thử lại.");
-        return text;
+        return { text, model };
       } catch (e) {
         if (e instanceof Error && /Khóa Gemini|quyền dùng|quá tải/.test(e.message)) throw e;
-        lastError = e instanceof Error ? e : new Error("Không gọi được AI (kiểm tra mạng).");
+        // Lỗi mạng của fetch là TypeError tiếng Anh thô ("Failed to
+        // fetch"/"Load failed") — dịch sang tiếng Việt dễ hiểu, không để
+        // lọt ra giao diện (nút Kiểm tra khóa từng hiện nguyên câu này).
+        lastError =
+          e instanceof TypeError ||
+          (e instanceof Error && /failed to fetch|networkerror|load failed/i.test(e.message))
+            ? new Error("Không gọi được AI — kiểm tra kết nối mạng rồi thử lại.")
+            : e instanceof Error
+              ? e
+              : new Error("Không gọi được AI (kiểm tra mạng).");
         break; // lỗi mạng → thử model khác cũng vô ích, nhưng cứ sang model kế cho chắc
       }
     }
@@ -88,7 +97,28 @@ async function geminiGenerate(parts: unknown[]): Promise<string> {
 }
 
 export async function runGeminiText(prompt: string): Promise<string> {
-  return geminiGenerate([{ text: prompt }]);
+  return (await geminiGenerate([{ text: prompt }])).text;
+}
+
+/**
+ * Kiểm tra khóa Gemini + kết nối AI — nút "Kiểm tra" trong app gọi hàm này.
+ * Gửi một yêu cầu tối thiểu để xác nhận khóa còn sống, mạng tới được Google
+ * và biết model nào đang đáp (bài học khóa OpenRouter chết âm thầm 22/10:
+ * người dùng phải tự phát hiện sớm thay vì chuyển file rồi mới biết).
+ */
+export async function checkAiConnection(): Promise<{ ok: boolean; message: string }> {
+  if (!hasGeminiKey()) {
+    return { ok: false, message: "Chưa có khóa Gemini. Hãy dán khóa vào ô khóa trước." };
+  }
+  try {
+    const { model } = await geminiGenerate([{ text: "Trả lời đúng một chữ: OK" }]);
+    return { ok: true, message: `Khóa Gemini hoạt động tốt — AI đang đáp bằng model ${model}.` };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "Không gọi được AI. Kiểm tra mạng rồi thử lại.",
+    };
+  }
 }
 
 /** Prompt đánh lại trang scan — ĐÃ ĐO THẬT trên CV 5095 trang 1: phủ 100% từ
@@ -105,10 +135,12 @@ QUY TẮC BẮT BUỘC:
 /** Gửi ẢNH một trang scan cho Gemini đánh lại thành văn bản thuần. */
 export async function transcribePageImage(jpegDataUrl: string): Promise<string> {
   const base64 = jpegDataUrl.replace(/^data:image\/[a-z]+;base64,/, "");
-  return geminiGenerate([
-    { text: TRANSCRIBE_PROMPT },
-    { inline_data: { mime_type: "image/jpeg", data: base64 } },
-  ]);
+  return (
+    await geminiGenerate([
+      { text: TRANSCRIBE_PROMPT },
+      { inline_data: { mime_type: "image/jpeg", data: base64 } },
+    ])
+  ).text;
 }
 
 export async function runAI(prompt: string): Promise<string> {

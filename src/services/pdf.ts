@@ -222,6 +222,54 @@ async function extractPageImages(page: any): Promise<{ urls: string[]; sizes: Ar
   return { urls, sizes };
 }
 
+/** Render một trang PDF thành canvas ở độ phóng OCR. */
+async function renderPageCanvas(page: any): Promise<HTMLCanvasElement> {
+  const ocrViewport = page.getViewport({ scale: OCR_RENDER_SCALE });
+  const rawCanvas = document.createElement("canvas");
+  rawCanvas.width = Math.floor(ocrViewport.width);
+  rawCanvas.height = Math.floor(ocrViewport.height);
+  const rawCtx = rawCanvas.getContext("2d");
+  if (!rawCtx) throw new Error("Trình duyệt không tạo được canvas để đọc trang scan.");
+  await page.render({ canvasContext: rawCtx, viewport: ocrViewport, canvas: rawCanvas } as any).promise;
+  return rawCanvas;
+}
+
+/** OCR một canvas trang đã render (tiền xử lý xám + tương phản như cũ). */
+async function ocrCanvasPage(
+  rawCanvas: HTMLCanvasElement,
+  onProgress: PdfProgress | undefined,
+  pageNumber: number,
+  totalPages: number
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = rawCanvas.width;
+  canvas.height = rawCanvas.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Trình duyệt không tạo được canvas để OCR.");
+  ctx.filter = "grayscale(100%) contrast(112%) brightness(104%)";
+  ctx.drawImage(rawCanvas, 0, 0);
+  return ocrPageImage(canvas, OCR_RENDER_SCALE, onProgress, pageNumber, totalPages);
+}
+
+/** Chạy một danh sách việc với số luồng song song tối đa cho trước. */
+async function runPool<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let idx = 0;
+  const runners = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (idx < items.length) {
+        const current = items[idx++];
+        await worker(current);
+      }
+    }
+  );
+  await Promise.all(runners);
+}
+
 export async function convertPdfFile(
   file: File,
   onProgress?: PdfProgress,
@@ -253,6 +301,28 @@ export async function convertPdfFile(
   const aiBlocksByPage = new Map<number, DocBlock[]>();
   let aiPageCount = 0;
   let aiCharCount = 0;
+  // B7: việc AI được gom ở vòng đọc trang rồi chạy song song ở pha 2.
+  const aiJobs: { pageNumber: number; width: number; height: number; jpeg: string }[] = [];
+  let scanPagesWithoutKey = 0;
+
+  /** OCR một trang đã render và ghi vào pages[] (dùng cho cả đường OCR
+   *  thẳng lẫn đường dự phòng khi AI lỗi). */
+  const ocrRenderedPage = async (
+    rawCanvas: HTMLCanvasElement,
+    pageNumber: number,
+    width: number,
+    height: number
+  ) => {
+    const { items: ocrItems, confidence } = await ocrCanvasPage(
+      rawCanvas,
+      onProgress,
+      pageNumber,
+      pdf.numPages
+    );
+    confidences.push(confidence);
+    if (ocrItems.length > 0) hasSignatureOrStampRisk = true;
+    pages.push({ pageNumber, width, height, items: ocrItems, source: "ocr" });
+  };
 
   for (let p = 1; p <= pdf.numPages; p++) {
     onProgress?.("Đang đọc trang", p, pdf.numPages);
@@ -284,7 +354,7 @@ export async function convertPdfFile(
     // không được tin lớp chữ đó — đối xử như trang scan (OCR lại từ hình trang).
     const garbledCheck = charCount >= MIN_CHARS_PER_PAGE ? pageTextLooksGarbled(items) : { garbled: false, reason: "" };
     if (garbledCheck.garbled) {
-      warnings.push(`Trang ${p}: lớp chữ bị lỗi (${garbledCheck.reason}) — đã OCR lại từ hình trang thay vì dùng lớp chữ.`);
+      warnings.push(`Trang ${p}: lớp chữ bị lỗi (${garbledCheck.reason}) — đã đọc lại từ hình trang thay vì dùng lớp chữ.`);
     }
 
     if (charCount >= MIN_CHARS_PER_PAGE && !garbledCheck.garbled) {
@@ -298,70 +368,80 @@ export async function convertPdfFile(
         imageDataUrls: urls.length ? urls : undefined,
         imageSizes: sizes.length ? sizes : undefined,
       });
+    } else if (scanEngine === "ai" && hasGeminiKey()) {
+      // Trang scan + chế độ AI: render ảnh trang (bản màu gốc — AI nhìn
+      // như người) và GOM VIỆC; việc chép chữ chạy song song ở pha 2 sau
+      // vòng đọc (B7). Trang nào AI lỗi ở pha 2 sẽ render lại + OCR.
+      onProgress?.("Đang render trang scan", p, pdf.numPages);
+      const rawCanvas = await renderPageCanvas(page);
+      aiJobs.push({
+        pageNumber: p,
+        width: viewport.width,
+        height: viewport.height,
+        jpeg: rawCanvas.toDataURL("image/jpeg", 0.85),
+      });
     } else {
-      // Trang scan / không có lớp chữ → render trang thành ảnh trước.
-      onProgress?.(scanEngine === "ai" ? "Đang render trang scan" : "Đang OCR trang scan", p, pdf.numPages);
-      const ocrViewport = page.getViewport({ scale: OCR_RENDER_SCALE });
-      const rawCanvas = document.createElement("canvas");
-      rawCanvas.width = Math.floor(ocrViewport.width);
-      rawCanvas.height = Math.floor(ocrViewport.height);
-      const rawCtx = rawCanvas.getContext("2d");
-      if (!rawCtx) throw new Error("Trình duyệt không tạo được canvas để đọc trang scan.");
-      await page.render({ canvasContext: rawCtx, viewport: ocrViewport, canvas: rawCanvas } as any).promise;
-
-      // CHẾ ĐỘ AI ĐÁNH LẠI: gửi ảnh trang (bản màu gốc — AI nhìn như người)
-      // cho Gemini chép lại từng chữ, rồi dựng blocks từ văn bản đó. Lỗi
-      // (mất mạng, hết lượt, khóa sai) thì TỰ rơi xuống OCR cho trang này
-      // kèm cảnh báo — không để cả file chết vì một trang.
-      let aiDone = false;
-      if (scanEngine === "ai") {
-        if (!hasGeminiKey()) {
-          warnings.push(`Trang ${p}: chưa có khóa Gemini nên không dùng AI đánh lại được — đã quét OCR thay thế. Dán khóa Gemini vào mục PDF → Word để AI đánh lại các trang scan.`);
-        } else {
-          onProgress?.("AI đang đánh lại trang scan", p, pdf.numPages);
-          try {
-            const jpeg = rawCanvas.toDataURL("image/jpeg", 0.85);
-            const aiText = await transcribePageImage(jpeg);
-            const aiBlocks = aiTextToBlocks(aiText);
-            if (aiBlocks.length > 0) {
-              aiBlocksByPage.set(p, aiBlocks);
-              aiPageCount++;
-              aiCharCount += aiText.length;
-              aiDone = true;
-            } else {
-              warnings.push(`Trang ${p}: AI không đọc được chữ nào — đã quét OCR thay thế.`);
-            }
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : "lỗi không rõ";
-            warnings.push(`Trang ${p}: AI đánh lại không thành công (${msg}) — đã quét OCR thay thế cho trang này.`);
-          }
-        }
-      }
-
-      if (!aiDone) {
-        // Quét OCR trên máy (Tesseract). Tiền xử lý nhẹ: chuyển xám + tăng
-        // tương phản/độ sáng — bản scan giấy thường ngả vàng/mờ, xử lý này
-        // giúp Tesseract bắt dấu tiếng Việt tốt hơn (đo thực tế +~1%).
-        const canvas = document.createElement("canvas");
-        canvas.width = rawCanvas.width;
-        canvas.height = rawCanvas.height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("Trình duyệt không tạo được canvas để OCR.");
-        ctx.filter = "grayscale(100%) contrast(112%) brightness(104%)";
-        ctx.drawImage(rawCanvas, 0, 0);
-        const { items: ocrItems, confidence } = await ocrPageImage(canvas, OCR_RENDER_SCALE, onProgress, p, pdf.numPages);
-        confidences.push(confidence);
-        if (ocrItems.length > 0) hasSignatureOrStampRisk = true;
-        pages.push({
-          pageNumber: p,
-          width: viewport.width,
-          height: viewport.height,
-          items: ocrItems,
-          source: "ocr",
-        });
-      }
+      // Trang scan + chế độ OCR (hoặc AI nhưng chưa có khóa): quét ngay.
+      if (scanEngine === "ai") scanPagesWithoutKey++;
+      onProgress?.("Đang OCR trang scan", p, pdf.numPages);
+      const rawCanvas = await renderPageCanvas(page);
+      await ocrRenderedPage(rawCanvas, p, viewport.width, viewport.height);
     }
   }
+
+  if (scanPagesWithoutKey > 0) {
+    warnings.push(
+      `Chưa có khóa Gemini nên ${scanPagesWithoutKey} trang scan đã quét OCR. Dán khóa Gemini vào mục PDF → Word để AI đánh lại các trang scan.`
+    );
+  }
+
+  // B7 — Pha 2: AI đánh lại SONG SONG (tối đa 3 trang cùng lúc) cho các
+  // trang scan đã gom. Lỗi ở trang nào (mất mạng, hết lượt, khóa sai) thì
+  // TỰ rơi xuống OCR cho trang đó kèm cảnh báo — không để cả file chết
+  // vì một trang, đúng hành vi trước đây, chỉ khác thời điểm chạy.
+  if (aiJobs.length > 0) {
+    let aiDoneCount = 0;
+    // OCR dự phòng phải chạy TUẦN TỰ (mỗi lần OCR dựng một worker
+    // Tesseract nặng bộ nhớ) — chỉ phần gọi AI mới chạy song song.
+    let ocrChain: Promise<void> = Promise.resolve();
+    const ocrSerialized = (fn: () => Promise<void>): Promise<void> => {
+      const run = ocrChain.then(fn, fn);
+      ocrChain = run.catch(() => undefined);
+      return run;
+    };
+    onProgress?.("AI đang đánh lại trang scan", 0, aiJobs.length);
+    await runPool(aiJobs, 3, async (job) => {
+      let ok = false;
+      try {
+        const aiText = await transcribePageImage(job.jpeg);
+        const aiBlocks = aiTextToBlocks(aiText);
+        if (aiBlocks.length > 0) {
+          aiBlocksByPage.set(job.pageNumber, aiBlocks);
+          aiPageCount++;
+          aiCharCount += aiText.length;
+          ok = true;
+        } else {
+          warnings.push(`Trang ${job.pageNumber}: AI không đọc được chữ nào — đã quét OCR thay thế.`);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "lỗi không rõ";
+        warnings.push(`Trang ${job.pageNumber}: AI đánh lại không thành công (${msg}) — đã quét OCR thay thế cho trang này.`);
+      }
+      if (!ok) {
+        await ocrSerialized(async () => {
+          const page = await pdf.getPage(job.pageNumber);
+          const rawCanvas = await renderPageCanvas(page);
+          await ocrRenderedPage(rawCanvas, job.pageNumber, job.width, job.height);
+        });
+      }
+      aiDoneCount++;
+      onProgress?.(`AI đã đánh lại ${aiDoneCount}/${aiJobs.length} trang scan`, aiDoneCount, aiJobs.length);
+    });
+  }
+
+  // Trang OCR dự phòng thêm ở pha 2 có thể lệch thứ tự trong pages[] —
+  // sắp lại theo số trang để phân loại + dựng blocks luôn đúng thứ tự.
+  pages.sort((a, b) => a.pageNumber - b.pageNumber);
 
   const info = classifyPdf(pages);
   if (aiPageCount > 0) {
