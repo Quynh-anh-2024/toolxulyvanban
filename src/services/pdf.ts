@@ -46,13 +46,15 @@ import {
 } from "../utils/pdfStructure";
 import { hasGeminiKey, transcribePageImage } from "./ai";
 import { aiTextToBlocks } from "../utils/aiText";
+import { crossCheckPage, crossCheckWarning } from "../utils/crossCheck";
 
-/** Cách đọc TRANG SCAN (trang không có lớp chữ dùng được):
- *  - "ai": gửi ảnh trang cho Gemini ĐÁNH LẠI từng chữ (đo thật trên CV 5095:
- *    phủ 100% từ so với bản chép tay; cần internet + khóa Gemini của người dùng).
- *  - "ocr": Tesseract chạy ngay trên máy (offline; trần ~89% với scan cổng).
- *  Trang có lớp chữ LUÔN đọc thẳng lớp chữ ở cả hai chế độ (chuẩn tuyệt đối). */
-export type ScanEngine = "ai" | "ocr";
+/** Cách đọc TRANG SCAN (trang không có lớp chữ dùng được) — TỰ ĐỘNG,
+ *  không còn nút chọn (theo yêu cầu của thầy Hải 22/10):
+ *  - Có khóa Gemini: AI ĐÁNH LẠI từng chữ từ ảnh trang (đo thật trên
+ *    CV 5095: phủ 100% từ so với bản chép tay) + OCR chạy nền đối chiếu,
+ *    gắn cờ những số liệu hai bên đọc khác nhau (xem utils/crossCheck).
+ *  - Chưa có khóa: OCR ngay trên máy (offline; trần ~89% với scan cổng).
+ *  Trang có lớp chữ LUÔN đọc thẳng lớp chữ (chuẩn tuyệt đối). */
 
 // Vá tương thích ở main thread đã được cài bởi import đầu tiên ở đầu file
 // (utils/installPolyfills) — trước cả khi pdf.js được nạp.
@@ -272,10 +274,8 @@ async function runPool<T>(
 
 export async function convertPdfFile(
   file: File,
-  onProgress?: PdfProgress,
-  options?: { scanEngine?: ScanEngine }
+  onProgress?: PdfProgress
 ): Promise<PdfConvertResult> {
-  const scanEngine: ScanEngine = options?.scanEngine === "ocr" ? "ocr" : "ai";
   const buffer = await file.arrayBuffer();
   // BẮT BUỘC khai báo cMapUrl/standardFontDataUrl/wasmUrl trỏ tới bản LOCAL
   // trong public/: pdf.js trên trình duyệt KHÔNG tự có các tệp này (khác môi
@@ -368,10 +368,10 @@ export async function convertPdfFile(
         imageDataUrls: urls.length ? urls : undefined,
         imageSizes: sizes.length ? sizes : undefined,
       });
-    } else if (scanEngine === "ai" && hasGeminiKey()) {
-      // Trang scan + chế độ AI: render ảnh trang (bản màu gốc — AI nhìn
-      // như người) và GOM VIỆC; việc chép chữ chạy song song ở pha 2 sau
-      // vòng đọc (B7). Trang nào AI lỗi ở pha 2 sẽ render lại + OCR.
+    } else if (hasGeminiKey()) {
+      // Trang scan + đã có khóa Gemini: render ảnh trang (bản màu gốc —
+      // AI nhìn như người) và GOM VIỆC; việc chép chữ + đối chiếu OCR
+      // chạy ở pha 2 sau vòng đọc.
       onProgress?.("Đang render trang scan", p, pdf.numPages);
       const rawCanvas = await renderPageCanvas(page);
       aiJobs.push({
@@ -381,8 +381,8 @@ export async function convertPdfFile(
         jpeg: rawCanvas.toDataURL("image/jpeg", 0.85),
       });
     } else {
-      // Trang scan + chế độ OCR (hoặc AI nhưng chưa có khóa): quét ngay.
-      if (scanEngine === "ai") scanPagesWithoutKey++;
+      // Trang scan nhưng chưa có khóa Gemini: quét OCR ngay.
+      scanPagesWithoutKey++;
       onProgress?.("Đang OCR trang scan", p, pdf.numPages);
       const rawCanvas = await renderPageCanvas(page);
       await ocrRenderedPage(rawCanvas, p, viewport.width, viewport.height);
@@ -391,24 +391,35 @@ export async function convertPdfFile(
 
   if (scanPagesWithoutKey > 0) {
     warnings.push(
-      `Chưa có khóa Gemini nên ${scanPagesWithoutKey} trang scan đã quét OCR. Dán khóa Gemini vào mục PDF → Word để AI đánh lại các trang scan.`
+      `Chưa có khóa Gemini nên ${scanPagesWithoutKey} trang scan đã quét OCR. Dán khóa Gemini vào mục PDF → Word để app dùng AI đánh lại kèm đối chiếu kiểm tra số liệu.`
     );
   }
 
-  // B7 — Pha 2: AI đánh lại SONG SONG (tối đa 3 trang cùng lúc) cho các
-  // trang scan đã gom. Lỗi ở trang nào (mất mạng, hết lượt, khóa sai) thì
-  // TỰ rơi xuống OCR cho trang đó kèm cảnh báo — không để cả file chết
-  // vì một trang, đúng hành vi trước đây, chỉ khác thời điểm chạy.
+  // Pha 2: AI đánh lại SONG SONG (tối đa 3 trang cùng lúc) cho các trang
+  // scan đã gom. Đồng thời OCR chạy NỀN (một hàng đợi tuần tự dùng chung)
+  // cho chính các trang đó để ĐỐI CHIẾU: trang nào AI lỗi thì kết quả
+  // OCR nền thành đường dự phòng luôn — một trang chỉ OCR đúng một lần.
   if (aiJobs.length > 0) {
     let aiDoneCount = 0;
-    // OCR dự phòng phải chạy TUẦN TỰ (mỗi lần OCR dựng một worker
-    // Tesseract nặng bộ nhớ) — chỉ phần gọi AI mới chạy song song.
-    let ocrChain: Promise<void> = Promise.resolve();
-    const ocrSerialized = (fn: () => Promise<void>): Promise<void> => {
-      const run = ocrChain.then(fn, fn);
-      ocrChain = run.catch(() => undefined);
-      return run;
+    type OcrResult = Awaited<ReturnType<typeof ocrCanvasPage>>;
+    const ocrTaskByPage = new Map<number, Promise<OcrResult>>();
+    let ocrQueue: Promise<unknown> = Promise.resolve();
+    const ensureOcr = (job: { pageNumber: number }): Promise<OcrResult> => {
+      const existing = ocrTaskByPage.get(job.pageNumber);
+      if (existing) return existing;
+      const task = ocrQueue.then(async () => {
+        const page = await pdf.getPage(job.pageNumber);
+        const rawCanvas = await renderPageCanvas(page);
+        return ocrCanvasPage(rawCanvas, undefined, job.pageNumber, pdf.numPages);
+      });
+      ocrQueue = task.catch(() => undefined);
+      ocrTaskByPage.set(job.pageNumber, task);
+      return task;
     };
+    // Khởi động OCR đối chiếu ngay — chạy trong lúc chờ AI trả lời.
+    for (const job of aiJobs) void ensureOcr(job).catch(() => undefined);
+
+    const aiTextByPage = new Map<number, string>();
     onProgress?.("AI đang đánh lại trang scan", 0, aiJobs.length);
     await runPool(aiJobs, 3, async (job) => {
       let ok = false;
@@ -417,6 +428,7 @@ export async function convertPdfFile(
         const aiBlocks = aiTextToBlocks(aiText);
         if (aiBlocks.length > 0) {
           aiBlocksByPage.set(job.pageNumber, aiBlocks);
+          aiTextByPage.set(job.pageNumber, aiText);
           aiPageCount++;
           aiCharCount += aiText.length;
           ok = true;
@@ -428,15 +440,38 @@ export async function convertPdfFile(
         warnings.push(`Trang ${job.pageNumber}: AI đánh lại không thành công (${msg}) — đã quét OCR thay thế cho trang này.`);
       }
       if (!ok) {
-        await ocrSerialized(async () => {
-          const page = await pdf.getPage(job.pageNumber);
-          const rawCanvas = await renderPageCanvas(page);
-          await ocrRenderedPage(rawCanvas, job.pageNumber, job.width, job.height);
+        const res = await ensureOcr(job);
+        confidences.push(res.confidence);
+        if (res.items.length > 0) hasSignatureOrStampRisk = true;
+        pages.push({
+          pageNumber: job.pageNumber,
+          width: job.width,
+          height: job.height,
+          items: res.items,
+          source: "ocr",
         });
       }
       aiDoneCount++;
       onProgress?.(`AI đã đánh lại ${aiDoneCount}/${aiJobs.length} trang scan`, aiDoneCount, aiJobs.length);
     });
+
+    // Đối chiếu AI ↔ OCR: chờ hàng đợi OCR chạy xong rồi so từng trang;
+    // chỉ gắn cờ khi số liệu (token chứa chữ số) hai bên đọc khác nhau.
+    onProgress?.("Đang đối chiếu AI với OCR", aiJobs.length, aiJobs.length);
+    const ocrResults = await Promise.allSettled([...ocrTaskByPage.values()]);
+    const ocrByPage = new Map<number, OcrResult>();
+    [...ocrTaskByPage.keys()].forEach((pageNumber, i) => {
+      const r = ocrResults[i];
+      if (r.status === "fulfilled") ocrByPage.set(pageNumber, r.value);
+    });
+    for (const job of aiJobs) {
+      const aiText = aiTextByPage.get(job.pageNumber);
+      const ocrRes = ocrByPage.get(job.pageNumber);
+      if (!aiText || !ocrRes) continue;
+      const ocrText = ocrRes.items.map((it) => it.text).join(" ");
+      const w = crossCheckWarning(job.pageNumber, crossCheckPage(aiText, ocrText));
+      if (w) warnings.push(w);
+    }
   }
 
   // Trang OCR dự phòng thêm ở pha 2 có thể lệch thứ tự trong pages[] —
