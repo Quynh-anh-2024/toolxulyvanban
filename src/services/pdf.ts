@@ -44,6 +44,15 @@ import {
   type DocBlock,
   type PdfClassification,
 } from "../utils/pdfStructure";
+import { hasGeminiKey, transcribePageImage } from "./ai";
+import { aiTextToBlocks } from "../utils/aiText";
+
+/** Cách đọc TRANG SCAN (trang không có lớp chữ dùng được):
+ *  - "ai": gửi ảnh trang cho Gemini ĐÁNH LẠI từng chữ (đo thật trên CV 5095:
+ *    phủ 100% từ so với bản chép tay; cần internet + khóa Gemini của người dùng).
+ *  - "ocr": Tesseract chạy ngay trên máy (offline; trần ~89% với scan cổng).
+ *  Trang có lớp chữ LUÔN đọc thẳng lớp chữ ở cả hai chế độ (chuẩn tuyệt đối). */
+export type ScanEngine = "ai" | "ocr";
 
 // Vá tương thích ở main thread đã được cài bởi import đầu tiên ở đầu file
 // (utils/installPolyfills) — trước cả khi pdf.js được nạp.
@@ -66,6 +75,8 @@ export interface PdfConvertResult {
   warnings: string[];
   /** Độ tin cậy OCR trung bình (%) — chỉ có khi có trang OCR. */
   ocrConfidence?: number;
+  /** Số trang scan đã được AI đánh lại (chỉ có khi chọn chế độ AI). */
+  aiPages?: number;
 }
 
 export type PdfProgress = (stage: string, page: number, totalPages: number) => void;
@@ -213,8 +224,10 @@ async function extractPageImages(page: any): Promise<{ urls: string[]; sizes: Ar
 
 export async function convertPdfFile(
   file: File,
-  onProgress?: PdfProgress
+  onProgress?: PdfProgress,
+  options?: { scanEngine?: ScanEngine }
 ): Promise<PdfConvertResult> {
+  const scanEngine: ScanEngine = options?.scanEngine === "ocr" ? "ocr" : "ai";
   const buffer = await file.arrayBuffer();
   // BẮT BUỘC khai báo cMapUrl/standardFontDataUrl/wasmUrl trỏ tới bản LOCAL
   // trong public/: pdf.js trên trình duyệt KHÔNG tự có các tệp này (khác môi
@@ -235,6 +248,11 @@ export async function convertPdfFile(
   const warnings: string[] = [];
   const confidences: number[] = [];
   let hasSignatureOrStampRisk = false;
+  // Trang scan đọc bằng AI: blocks dựng thẳng từ văn bản AI đánh lại,
+  // không qua pages[]/pdfPagesToBlocks (không có tọa độ để mà dựng).
+  const aiBlocksByPage = new Map<number, DocBlock[]>();
+  let aiPageCount = 0;
+  let aiCharCount = 0;
 
   for (let p = 1; p <= pdf.numPages; p++) {
     onProgress?.("Đang đọc trang", p, pdf.numPages);
@@ -281,39 +299,84 @@ export async function convertPdfFile(
         imageSizes: sizes.length ? sizes : undefined,
       });
     } else {
-      // Trang scan / không có lớp chữ → render + OCR.
-      onProgress?.("Đang OCR trang scan", p, pdf.numPages);
+      // Trang scan / không có lớp chữ → render trang thành ảnh trước.
+      onProgress?.(scanEngine === "ai" ? "Đang render trang scan" : "Đang OCR trang scan", p, pdf.numPages);
       const ocrViewport = page.getViewport({ scale: OCR_RENDER_SCALE });
       const rawCanvas = document.createElement("canvas");
       rawCanvas.width = Math.floor(ocrViewport.width);
       rawCanvas.height = Math.floor(ocrViewport.height);
       const rawCtx = rawCanvas.getContext("2d");
-      if (!rawCtx) throw new Error("Trình duyệt không tạo được canvas để OCR.");
+      if (!rawCtx) throw new Error("Trình duyệt không tạo được canvas để đọc trang scan.");
       await page.render({ canvasContext: rawCtx, viewport: ocrViewport, canvas: rawCanvas } as any).promise;
-      // Tiền xử lý nhẹ cho OCR: chuyển xám + tăng tương phản/độ sáng — bản scan
-      // giấy thường ngả vàng/mờ, xử lý này giúp Tesseract bắt dấu tiếng Việt
-      // tốt hơn (đo thực tế +~1% độ phủ từ, không tốn thêm bộ nhớ đáng kể).
-      const canvas = document.createElement("canvas");
-      canvas.width = rawCanvas.width;
-      canvas.height = rawCanvas.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Trình duyệt không tạo được canvas để OCR.");
-      ctx.filter = "grayscale(100%) contrast(112%) brightness(104%)";
-      ctx.drawImage(rawCanvas, 0, 0);
-      const { items: ocrItems, confidence } = await ocrPageImage(canvas, OCR_RENDER_SCALE, onProgress, p, pdf.numPages);
-      confidences.push(confidence);
-      if (ocrItems.length > 0) hasSignatureOrStampRisk = true;
-      pages.push({
-        pageNumber: p,
-        width: viewport.width,
-        height: viewport.height,
-        items: ocrItems,
-        source: "ocr",
-      });
+
+      // CHẾ ĐỘ AI ĐÁNH LẠI: gửi ảnh trang (bản màu gốc — AI nhìn như người)
+      // cho Gemini chép lại từng chữ, rồi dựng blocks từ văn bản đó. Lỗi
+      // (mất mạng, hết lượt, khóa sai) thì TỰ rơi xuống OCR cho trang này
+      // kèm cảnh báo — không để cả file chết vì một trang.
+      let aiDone = false;
+      if (scanEngine === "ai") {
+        if (!hasGeminiKey()) {
+          warnings.push(`Trang ${p}: chưa có khóa Gemini nên không dùng AI đánh lại được — đã quét OCR thay thế. Dán khóa Gemini vào mục PDF → Word để AI đánh lại các trang scan.`);
+        } else {
+          onProgress?.("AI đang đánh lại trang scan", p, pdf.numPages);
+          try {
+            const jpeg = rawCanvas.toDataURL("image/jpeg", 0.85);
+            const aiText = await transcribePageImage(jpeg);
+            const aiBlocks = aiTextToBlocks(aiText);
+            if (aiBlocks.length > 0) {
+              aiBlocksByPage.set(p, aiBlocks);
+              aiPageCount++;
+              aiCharCount += aiText.length;
+              aiDone = true;
+            } else {
+              warnings.push(`Trang ${p}: AI không đọc được chữ nào — đã quét OCR thay thế.`);
+            }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "lỗi không rõ";
+            warnings.push(`Trang ${p}: AI đánh lại không thành công (${msg}) — đã quét OCR thay thế cho trang này.`);
+          }
+        }
+      }
+
+      if (!aiDone) {
+        // Quét OCR trên máy (Tesseract). Tiền xử lý nhẹ: chuyển xám + tăng
+        // tương phản/độ sáng — bản scan giấy thường ngả vàng/mờ, xử lý này
+        // giúp Tesseract bắt dấu tiếng Việt tốt hơn (đo thực tế +~1%).
+        const canvas = document.createElement("canvas");
+        canvas.width = rawCanvas.width;
+        canvas.height = rawCanvas.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Trình duyệt không tạo được canvas để OCR.");
+        ctx.filter = "grayscale(100%) contrast(112%) brightness(104%)";
+        ctx.drawImage(rawCanvas, 0, 0);
+        const { items: ocrItems, confidence } = await ocrPageImage(canvas, OCR_RENDER_SCALE, onProgress, p, pdf.numPages);
+        confidences.push(confidence);
+        if (ocrItems.length > 0) hasSignatureOrStampRisk = true;
+        pages.push({
+          pageNumber: p,
+          width: viewport.width,
+          height: viewport.height,
+          items: ocrItems,
+          source: "ocr",
+        });
+      }
     }
   }
 
   const info = classifyPdf(pages);
+  if (aiPageCount > 0) {
+    // classifyPdf chỉ nhìn pages[] (lớp chữ + OCR) — cộng phần AI vào cho đúng.
+    info.totalPages = pdf.numPages;
+    info.totalChars += aiCharCount;
+    info.kind = info.textPages > 0 || info.ocrPages > 0 ? "mixed" : "scanned";
+    info.label =
+      `PDF ${info.totalPages} trang: ${info.textPages} trang lớp chữ` +
+      ` · ${aiPageCount} trang AI đánh lại` +
+      (info.ocrPages > 0 ? ` · ${info.ocrPages} trang OCR` : "");
+    warnings.push(
+      `Đã dùng AI đánh lại ${aiPageCount} trang scan — chữ chép rất sát bản gốc (đo thật: đúng ~100% từ trên văn bản hành chính). Chữ ký và con dấu là hình ảnh nên AI không chuyển thành chữ được.`
+    );
+  }
   if (info.kind === "empty") {
     warnings.push("Không trích được chữ từ PDF này (có thể file hỏng hoặc được bảo vệ). Hãy thử mở PDF và in lại thành PDF mới.");
   }
@@ -327,7 +390,23 @@ export async function convertPdfFile(
     }
   }
 
-  const blocks = pdfPagesToBlocks(pages);
+  let blocks: DocBlock[];
+  if (aiBlocksByPage.size === 0) {
+    blocks = pdfPagesToBlocks(pages);
+  } else {
+    // Ghép theo đúng thứ tự trang: trang AI lấy blocks AI, trang còn lại
+    // dựng từ items như thường (mỗi trang độc lập khi có trang AI chen vào).
+    blocks = [];
+    const itemByPage = new Map(pages.map((pg) => [pg.pageNumber, pg]));
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const aiBlocks = aiBlocksByPage.get(p);
+      if (aiBlocks) blocks.push(...aiBlocks);
+      else {
+        const itemPage = itemByPage.get(p);
+        if (itemPage) blocks.push(...pdfPagesToBlocks([itemPage]));
+      }
+    }
+  }
   return {
     blocks,
     html: blocksToHtml(blocks),
@@ -337,5 +416,6 @@ export async function convertPdfFile(
     ocrConfidence: confidences.length
       ? Math.round(confidences.reduce((a, b) => a + b, 0) / confidences.length)
       : undefined,
+    aiPages: aiPageCount || undefined,
   };
 }
