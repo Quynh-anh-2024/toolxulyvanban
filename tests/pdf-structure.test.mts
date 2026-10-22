@@ -232,6 +232,80 @@ async function main() {
     assert.equal(classifyPdf([emptyScan]).kind, "scanned");
   });
 
+  // --- Hồi quy vụ "cơ chế quét" (22/10/2026): trang scan phải giữ nguyên
+  // dòng/đoạn của Tesseract — đoạn văn căn đều KHÔNG được biến thành bảng,
+  // chữ không bị xáo trộn/nuốt; tên cơ quan ở dòng bị gộp 2 cột không bị
+  // quốc hiệu nuốt; khối chữ ký chen trong vùng Nơi nhận phải tách ra sau.
+  check("Trang scan: đoạn văn giữ nguyên thứ tự, không thành bảng, header đủ 2 cột", () => {
+    const oitem = (text: string, x: number, y: number, w: number, lineId: number, paraId: number): PdfTextItem => ({
+      text: text + " ",
+      x, y, width: w, height: 13, fontSize: 13,
+      bold: false, italic: false, fontName: "ocr", conf: 95, lineId, paraId,
+    });
+    const items: PdfTextItem[] = [
+      // Dòng đầu bị Tesseract gộp 2 cột: cơ quan + quốc hiệu (khe 33pt).
+      oitem("BỘ", 75, 40, 20, 1, 1), oitem("GIÁO", 98, 40, 25, 1, 1), oitem("DỤC", 126, 40, 22, 1, 1),
+      oitem("VÀ", 151, 40, 16, 1, 1), oitem("ĐÀO", 170, 40, 22, 1, 1), oitem("TẠO", 195, 40, 20, 1, 1),
+      oitem("CỘNG", 248, 40, 30, 1, 1), oitem("HÒA", 281, 40, 25, 1, 1), oitem("XÃ", 309, 40, 15, 1, 1),
+      oitem("HỘI", 327, 40, 22, 1, 1), oitem("CHỦ", 352, 40, 22, 1, 1), oitem("NGHĨA", 377, 40, 32, 1, 1),
+      oitem("VIỆT", 412, 40, 25, 1, 1), oitem("NAM", 440, 40, 22, 1, 1),
+      oitem("Độc", 330, 58, 20, 2, 1), oitem("lập", 353, 58, 16, 2, 1), oitem("Tự", 380, 58, 14, 2, 1),
+      oitem("do", 397, 58, 14, 2, 1), oitem("Hạnh", 425, 58, 25, 2, 1), oitem("phúc", 453, 58, 25, 2, 1),
+      oitem("Số:", 75, 84, 18, 3, 2), oitem("5095/BGDĐT-NGCBQLGD", 96, 84, 110, 3, 2),
+      oitem("Hà", 270, 84, 16, 3, 2), oitem("Nội,", 289, 84, 22, 3, 2), oitem("ngày", 314, 84, 25, 3, 2),
+      oitem("04", 342, 84, 14, 3, 2), oitem("tháng", 359, 84, 28, 3, 2), oitem("08", 390, 84, 14, 3, 2),
+      oitem("năm", 407, 84, 20, 3, 2), oitem("2026", 430, 84, 24, 3, 2),
+      // Đoạn thân 3 dòng (y rung ±1, có khe căn đều 20pt giữa dòng).
+      oitem("Thực", 110, 140, 24, 4, 3), oitem("hiện", 137, 141, 22, 4, 3), oitem("ý", 162, 140, 8, 4, 3),
+      oitem("kiến", 173, 140, 24, 4, 3), oitem("chỉ", 200, 141, 16, 4, 3), oitem("đạo", 219, 140, 20, 4, 3),
+      oitem("của", 242, 140, 18, 4, 3), oitem("Phó", 263, 140, 18, 4, 3), oitem("Thủ", 284, 141, 18, 4, 3),
+      oitem("tướng", 305, 140, 30, 4, 3), oitem("Chính", 355, 140, 26, 4, 3), oitem("phủ", 384, 140, 18, 4, 3),
+      oitem("tại", 405, 141, 16, 4, 3),
+      oitem("Công", 75, 158, 26, 5, 3), oitem("văn", 104, 158, 20, 5, 3), oitem("số", 127, 159, 14, 5, 3),
+      oitem("4283/VPCP-KGVX", 144, 158, 95, 5, 3), oitem("ngày", 242, 158, 25, 5, 3),
+      oitem("12/5/2026,", 270, 158, 55, 5, 3), oitem("Bộ", 328, 159, 16, 5, 3), oitem("Giáo", 347, 158, 24, 5, 3),
+      oitem("dục", 374, 158, 18, 5, 3), oitem("và", 395, 158, 16, 5, 3), oitem("Đào", 414, 159, 22, 5, 3),
+      oitem("tạo", 439, 158, 18, 5, 3), oitem("phối", 460, 158, 22, 5, 3), oitem("hợp", 485, 158, 18, 5, 3),
+      oitem("với", 75, 176, 20, 6, 3), oitem("các", 98, 176, 20, 6, 3), oitem("đơn", 121, 177, 20, 6, 3),
+      oitem("vị", 144, 176, 12, 6, 3), oitem("có", 159, 176, 16, 6, 3), oitem("liên", 178, 176, 22, 6, 3),
+      oitem("quan", 203, 177, 24, 6, 3), oitem("xây", 230, 176, 20, 6, 3), oitem("dựng", 253, 176, 24, 6, 3),
+      oitem("dự", 280, 176, 14, 6, 3), oitem("thảo", 297, 177, 24, 6, 3), oitem("Nghị", 324, 176, 22, 6, 3),
+      oitem("quyết", 349, 176, 26, 6, 3), oitem("này.", 378, 176, 24, 6, 3),
+      // Vùng Nơi nhận bị chữ ký chen segment bên phải vào cùng dòng.
+      oitem("Nơi", 75, 640, 20, 7, 4), oitem("nhận:", 98, 640, 28, 7, 4),
+      oitem("BỘ", 345, 640, 18, 7, 4), oitem("TRƯỞNG", 366, 640, 40, 7, 4),
+      oitem("-", 75, 658, 6, 8, 4), oitem("Như", 84, 658, 20, 8, 4), oitem("trên;", 107, 658, 26, 8, 4),
+      oitem("THƯỜNG", 345, 658, 38, 8, 4), oitem("TRỰC", 386, 658, 26, 8, 4),
+      oitem("-", 75, 676, 6, 9, 4), oitem("Lưu:", 84, 676, 22, 9, 4), oitem("VT,", 109, 676, 18, 9, 4),
+      oitem("NGCBQLGD.", 130, 676, 58, 9, 4),
+    ];
+    const page: PdfPageInput = { pageNumber: 1, width: 595, height: 842, items, source: "ocr" };
+    const blks = pdfPagesToBlocks([page]);
+    const rawAll = blocksToRawText(blks);
+    // 1) Không có bảng dữ liệu nào sinh ra từ đoạn văn scan.
+    assert.ok(!blks.some((b) => b.kind === "table" && b.role === "data"), "đoạn văn scan bị biến thành bảng");
+    // 2) Header: bảng adminHeader và tên cơ quan còn nguyên (không bị quốc hiệu nuốt).
+    const header = blks[0];
+    assert.ok(header.kind === "table" && header.role === "adminHeader", "thiếu bảng đầu trang");
+    assert.ok(rawAll.includes("BỘ GIÁO DỤC VÀ ĐÀO TẠO"), "mất tên cơ quan ban hành");
+    assert.ok(rawAll.includes("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"), "mất quốc hiệu");
+    // 3) Đoạn thân nguyên vẹn, đúng thứ tự từng chữ.
+    const body = blks.find((b) => b.kind === "paragraph" && b.runs.map((r) => r.text).join("").includes("Thực hiện"));
+    assert.ok(body && body.kind === "paragraph", "không thấy đoạn thân");
+    const bodyText = body.kind === "paragraph" ? body.runs.map((r) => r.text).join("") : "";
+    assert.ok(
+      bodyText.includes("Thực hiện ý kiến chỉ đạo của Phó Thủ tướng Chính phủ tại Công văn số 4283/VPCP-KGVX ngày 12/5/2026, Bộ Giáo dục và Đào tạo phối hợp với các đơn vị có liên quan xây dựng dự thảo Nghị quyết này."),
+      "đoạn thân bị xáo trộn/mất chữ: " + bodyText
+    );
+    // 4) Chữ ký tách khỏi Nơi nhận và đứng sau toàn bộ danh sách nơi nhận.
+    const recip = blks.find((b) => b.kind === "paragraph" && b.runs.map((r) => r.text).join("").startsWith("Nơi nhận"));
+    assert.ok(recip && recip.kind === "paragraph", "không thấy đoạn Nơi nhận");
+    const recipText = recip.kind === "paragraph" ? recip.runs.map((r) => r.text).join("") : "";
+    assert.ok(!recipText.includes("TRƯỞNG"), "chữ ký còn chen trong Nơi nhận: " + recipText);
+    assert.ok(rawAll.indexOf("Lưu:") < rawAll.indexOf("BỘ TRƯỞNG"), "khối chữ ký phải đứng sau Nơi nhận");
+    assert.ok(rawAll.indexOf("Lưu:") < rawAll.indexOf("THƯỜNG TRỰC"), "dòng chức danh ký phải đứng sau Nơi nhận");
+  });
+
   const buf = await buildDocxBuffer(blocks, CONFIG);
   assert.equal(buf.subarray(0, 2).toString(), "PK");
   assert.ok(buf.length > 1024);

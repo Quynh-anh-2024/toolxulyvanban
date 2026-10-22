@@ -54,6 +54,15 @@ def main() -> int:
         check("Không còn ký tự rác kiểu OCR ('s5igs', 'wu')", "s5igs" not in text and "wu" not in text)
         check(f"Dấu '|' lạ gần như không còn (đếm: {text.count('|')})", text.count("|") < 5)
 
+        # Từ 22/10/2026: Excel là MỤC RIÊNG — trích bảng từ PDF nằm ở mục
+        # Excel, không còn nút Excel trong mục PDF → Word. Chuyển mục, nạp
+        # lại chính file bảng vào công cụ "Trích bảng từ PDF ra Excel".
+        page.click("role=tab[name='Excel']")
+        page.set_input_files("#pdfTableInput", str(BANG))
+        page.wait_for_function(
+            "() => document.body.innerText.includes('bảng đã trích')",
+            timeout=180000,
+        )
         with page.expect_download(timeout=60000) as dl_info:
             page.click("text=Tải Excel (.xlsx)")
         dl = dl_info.value
@@ -74,7 +83,8 @@ def main() -> int:
         check("Excel tải xuống không chứa rác 's5igs'", "s5igs" not in joined)
 
         print("File 2 — CV 5095/BGDĐT (bản SCAN thật từ cổng ký số: đúng đường OCR)")
-        page.set_input_files("input[type=file]", str(CV))
+        page.click("role=tab[name='PDF → Word']")
+        page.set_input_files("#fileInput", str(CV))
         page.wait_for_function(
             "() => document.body.innerText.includes('Trang OCR: 3')",
             timeout=300000,
