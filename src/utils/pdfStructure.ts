@@ -1072,7 +1072,13 @@ export function pdfPagesToBlocks(pages: PdfPageInput[]): DocBlock[] {
   const blocks: DocBlock[] = [];
   let titleConsumed = false;
 
-  pages.forEach((page, pageIdx) => {
+  pages.forEach((page) => {
+    // Chỉ số trang TOÀN CỤC suy từ số trang thật (pageNumber), KHÔNG dùng vị
+    // trí trong mảng: services/pdf.ts có lúc gọi hàm này cho TỪNG trang một
+    // (khi ghép trang AI với trang thường) — nếu dùng vị trí mảng thì mọi
+    // trang đều thành "trang 1" và phần đầu thể thức bị dựng nhầm ở mọi
+    // trang (nuốt mất nội dung đầu trang 2, 3... — lỗi đã gặp ở CV 5095).
+    const pageIdx = page.pageNumber - 1;
     // Trang scan đi đường riêng (giữ cấu trúc của Tesseract) — xem ocrPageBlocks.
     if (page.source === "ocr") {
       const res = ocrPageBlocks(page, pageIdx, titleConsumed);
