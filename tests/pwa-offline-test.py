@@ -49,7 +49,7 @@ def main() -> int:
             j = manifest["json"]
             check(
                 f"Manifest đúng tên app + có icon 512 ({j.get('short_name')})",
-                j.get("name", "").startswith("Chuẩn Hóa") and any("512" in (i.get("sizes") or "") for i in j.get("icons", [])),
+                j.get("name", "").startswith("Chuyển PDF") and any("512" in (i.get("sizes") or "") for i in j.get("icons", [])),
             )
         sw_state = page.evaluate(
             """async () => {
@@ -64,10 +64,7 @@ def main() -> int:
 
         print("Giai đoạn 2 — nạp tài nguyên OCR vào bộ nhớ đệm (vẫn có mạng)")
         page.set_input_files("input[type=file]", str(SCAN_PDF))
-        page.wait_for_function(
-            "() => document.body.innerText.includes('THÔNG BÁO')",
-            timeout=240000,
-        )
+        page.locator("button", has_text="Tải file Word").wait_for(state="visible", timeout=240000)
         check("OCR online chạy xong (làm ấm bộ nhớ đệm)", True)
         cache_info = page.evaluate(
             """async () => {
@@ -91,19 +88,16 @@ def main() -> int:
         page.reload(wait_until="load")
         page.wait_for_timeout(2500)
         has_ui = page.evaluate(
-            "() => !!document.querySelector('input[type=file]') && document.body.innerText.length > 200"
+            "() => !!document.querySelector('input[type=file]') && document.body.innerText.length > 50"
         )
-        check("App mở được khi không có mạng", has_ui)
+        check("App mở được khi không có mạng (giao diện tối giản ít chữ — ngưỡng 50 ký tự; giai đoạn 4-5 dưới đây chứng minh chạy thật)", has_ui)
 
         print("Giai đoạn 4 — OFFLINE: chuyển PDF chữ -> Word")
         page.set_input_files("input[type=file]", str(TEXT_PDF))
-        page.wait_for_function(
-            "() => document.body.innerText.includes('KẾ HOẠCH')",
-            timeout=120000,
-        )
-        check("Đọc PDF chữ offline: thấy nội dung KẾ HOẠCH", True)
+        page.locator("button", has_text="Tải file Word").wait_for(state="visible", timeout=120000)
+        check("Đọc PDF chữ offline xong (nút tải Word hiện)", True)
         with page.expect_download(timeout=60000) as dl_info:
-            page.click("text=Tải File Word (.docx) Chuẩn NĐ 30")
+            page.click("button:has-text('Tải file Word')")
         dl = dl_info.value
         target = OUT / "offline-pdf-to-word.docx"
         dl.save_as(str(target))
@@ -111,11 +105,15 @@ def main() -> int:
 
         print("Giai đoạn 5 — OFFLINE: OCR bản scan")
         page.set_input_files("input[type=file]", str(SCAN_PDF))
-        page.wait_for_function(
-            "() => document.body.innerText.includes('nghỉ lễ') || document.body.innerText.includes('Quốc khánh')",
-            timeout=240000,
-        )
-        check("OCR offline đọc được nội dung bản scan", True)
+        page.locator("button", has_text="Tải file Word").wait_for(state="visible", timeout=240000)
+        with page.expect_download(timeout=60000) as dl_info:
+            page.click("button:has-text('Tải file Word')")
+        dl = dl_info.value
+        scan_docx = OUT / "offline-scan.docx"
+        dl.save_as(str(scan_docx))
+        from docx import Document
+        scan_text = "\n".join(pp.text for pp in Document(scan_docx).paragraphs)
+        check("OCR offline đọc được nội dung bản scan", "THÔNG BÁO" in scan_text or "nghỉ lễ" in scan_text or "Quốc khánh" in scan_text)
 
         if errors:
             failures.append(f"Lỗi JS: {errors[:2]}")
