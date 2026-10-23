@@ -1,132 +1,53 @@
-import React, { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import React, { ChangeEvent, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
-  CheckCircle2,
-  Eye,
-  FileQuestion,
   FileSpreadsheet,
   FileText,
   Loader2,
-  Save,
-  Settings,
-  SlidersHorizontal,
   Upload,
-  Wand2,
-  Wrench,
-  X,
 } from "lucide-react";
 
 import { cn } from "./lib/utils";
-import { PdfSection } from "./sections/PdfSection";
-import { ExcelSection } from "./sections/ExcelSection";
-import { WordSection } from "./sections/WordSection";
-import { MarginConfig } from "./components/MarginConfig";
-import { PreviewPane } from "./components/PreviewPane";
 import { NoticeBar } from "./components/NoticeBar";
-import { runAI, getGeminiKey, setGeminiKey, hasGeminiKey, checkAiConnection } from "./services/ai";
-// B8 — Tách gói tải theo nhu cầu: các module nặng (pdf.js + Tesseract trong
+import { setGeminiKey, hasGeminiKey, checkAiConnection } from "./services/ai";
+// Tách gói tải theo nhu cầu: các module nặng (pdf.js + Tesseract trong
 // services/pdf, xlsx trong services/excel + utils/spreadsheet, docx trong
-// utils/docxExport, mammoth) KHÔNG nạp khi mở app; mỗi thao tác tự nạp
-// module của nó bằng import() động ngay trước khi dùng. Ở đây chỉ giữ
-// import KIỂU (type) — bị xoá lúc biên dịch, không kéo theo mã thật.
+// utils/docxExport) KHÔNG nạp khi mở app; mỗi thao tác tự nạp module của
+// nó bằng import() động ngay trước khi dùng. Ở đây chỉ giữ import KIỂU
+// (type) — bị xoá lúc biên dịch, không kéo theo mã thật.
 import type { PdfConvertResult } from "./services/pdf";
-import type { SheetInfo } from "./utils/spreadsheet";
-import type { DocBlock, PdfClassification } from "./utils/pdfStructure";
-import {
-  DocumentProcessingMode,
-  DocumentStats,
-  FormattingConfig,
-  analyzeDocumentHtml,
-  enhanceAdministrativeDocumentHtml,
-  processHtmlToRemoveBullets,
-} from "./utils/docx";
-
-const EMPTY_STATS: DocumentStats = {
-  tableCount: 0,
-  imageCount: 0,
-  firstTableHasBorderRisk: false,
-  administrativeHeaderDetected: false,
-  signatureTableDetected: false,
-  warningMessages: [],
-};
-
-const processingModes: Array<{
-  value: DocumentProcessingMode;
-  title: string;
-}> = [
-  { value: "preserve", title: "Giữ nguyên định dạng gốc tối đa" },
-  { value: "nd30", title: "Chuẩn hóa theo NĐ 30" },
-  { value: "textOnly", title: "Chỉ lấy nội dung để AI soát lỗi" },
-];
+import type { DocBlock } from "./utils/pdfStructure";
+import type { FormattingConfig } from "./utils/docx";
 
 /**
- * Giao diện MỘT MÀN HÌNH (như app phiếu học tập): thanh trên + vùng làm
- * việc 2 cột — cột trái là công cụ, cột phải là bản xem trước A4, mỗi cột
- * tự cuộn. Ba MỤC RIÊNG biệt, không chung đụng dữ liệu/nút bấm:
- *  1. "PDF → Word": chỉ nhận PDF, chỉ xuất Word .docx chuẩn NĐ 30.
- *  2. "Excel": bảng tính → Word/Excel và trích bảng từ PDF → Excel.
- *  3. "Word & AI": chuẩn hoá file Word có sẵn + soát lỗi AI.
- * Mỗi mục giữ kết quả riêng (snapshot) — chuyển mục không mất việc đang làm.
+ * Giao diện TỐI GIẢN một màn hình (yêu cầu của Hải 23/10/2026 — "ẩn tất
+ * cả, thành cơ chế tự động, nhìn lằng nhằng quá"): tải PDF lên là app tự
+ * xử lý (trang có lớp chữ đọc thẳng; trang scan: có khóa Gemini thì AI
+ * đánh lại + đối chiếu OCR kiểm tra số liệu, chưa có khóa thì quét OCR),
+ * xong chỉ hiện 2 nút tải file Word / Excel. Thể thức lề lối dùng mặc
+ * định chuẩn Nghị định 30 bên dưới — không còn mục chỉnh, không xem
+ * trước, không mục Word & AI, không đọc file bảng tính.
  */
-type Section = "pdf" | "excel" | "word";
-
-interface DocSnapshot {
-  sourceHtml: string;
-  rawText: string;
-  fileName: string;
-  fileStatus: string;
-  hasFile: boolean;
-  isLegacyDoc: boolean;
-  stats: DocumentStats;
-}
-
-const EMPTY_SNAPSHOT: DocSnapshot = {
-  sourceHtml: "",
-  rawText: "",
-  fileName: "Tai_Lieu",
-  fileStatus: "Chưa có file nào",
-  hasFile: false,
-  isLegacyDoc: false,
-  stats: EMPTY_STATS,
+const DEFAULT_CONFIG: FormattingConfig = {
+  font: "Times New Roman",
+  size: 14,
+  spacing: "1.5",
+  textAlign: "justify",
+  textIndent: 1.27,
+  paraSpacing: 6,
+  leftMargin: 3,
+  rightMargin: 2,
 };
 
-const SECTION_TABS: Array<{ value: Section; label: string; icon: React.ReactNode }> = [
-  { value: "pdf", label: "PDF → Word", icon: <FileText className="w-4 h-4" /> },
-  { value: "excel", label: "Excel", icon: <FileSpreadsheet className="w-4 h-4" /> },
-  { value: "word", label: "Word & AI", icon: <Wand2 className="w-4 h-4" /> },
-];
-
 export default function App() {
-  const [section, setSection] = useState<Section>("pdf");
-  const [mobilePane, setMobilePane] = useState<"tools" | "preview">("tools");
-  const snapshotsRef = useRef<Record<Section, DocSnapshot>>({
-    pdf: EMPTY_SNAPSHOT,
-    excel: EMPTY_SNAPSHOT,
-    word: EMPTY_SNAPSHOT,
-  });
-
-  // --- Trạng thái tài liệu đang hiển thị (của mục đang mở) ---
   const [fileName, setFileName] = useState("Tai_Lieu");
   const [fileStatus, setFileStatus] = useState("Chưa có file nào");
-  const [sourceHtml, setSourceHtml] = useState("");
-  const [rawText, setRawText] = useState("");
-  const [docHtml, setDocHtml] = useState("");
-  const [hasFile, setHasFile] = useState(false);
-  const [isLegacyDoc, setIsLegacyDoc] = useState(false);
-  const [documentStats, setDocumentStats] = useState<DocumentStats>(EMPTY_STATS);
-
-  const [processingMode, setProcessingMode] = useState<DocumentProcessingMode>("preserve");
-  const [showPreviewFrame, setShowPreviewFrame] = useState(false);
-
-  // --- Kết quả RIÊNG của từng mục ---
   const [pdfBlocks, setPdfBlocks] = useState<DocBlock[] | null>(null);
-  const [pdfInfo, setPdfInfo] = useState<PdfClassification | null>(null);
   const [pdfWarnings, setPdfWarnings] = useState<string[]>([]);
-  const [pdfOcrConfidence, setPdfOcrConfidence] = useState<number | undefined>(undefined);
-  const [pdfAiPages, setPdfAiPages] = useState<number | undefined>(undefined);
-  // Cách đọc trang scan TỰ ĐỘNG (không còn nút chọn — yêu cầu của Hải
-  // 22/10): có khóa Gemini thì AI đánh lại + đối chiếu OCR, chưa có thì OCR.
+  const [tableCount, setTableCount] = useState(0);
+  const [isConverting, setIsConverting] = useState(false);
+  const [convertProgress, setConvertProgress] = useState("");
+
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [geminiKeySaved, setGeminiKeySaved] = useState<boolean>(() => hasGeminiKey());
   const [aiChecking, setAiChecking] = useState(false);
@@ -149,55 +70,16 @@ export default function App() {
     noticeTimer.current = window.setTimeout(() => setNotice(null), 7000);
   };
 
-  // Xem trước: thu nhỏ trang A4 vừa bề rộng khung (mặc định bật khi màn hình nhỏ).
-  const [previewFit, setPreviewFit] = useState<boolean>(
-    () => typeof window !== "undefined" && window.innerWidth < 1024
-  );
-  const [previewScale, setPreviewScale] = useState(1);
-  const previewScrollRef = useRef<HTMLDivElement>(null);
-
-  const [excelBlocks, setExcelBlocks] = useState<DocBlock[] | null>(null);
-  const [excelSheets, setExcelSheets] = useState<SheetInfo[] | null>(null);
-  const [excelWarnings, setExcelWarnings] = useState<string[]>([]);
-
-  const [pdfTableBlocks, setPdfTableBlocks] = useState<DocBlock[] | null>(null);
-  const [pdfTableName, setPdfTableName] = useState("");
-
-  const [isConverting, setIsConverting] = useState(false);
-  const [convertProgress, setConvertProgress] = useState("");
-
-  const [config, setConfig] = useState<FormattingConfig>({
-    font: "Times New Roman",
-    size: 14,
-    spacing: "1.5",
-    textAlign: "justify",
-    textIndent: 1.27,
-    paraSpacing: 6,
-    leftMargin: 3,
-    rightMargin: 2,
-  });
-
-  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
-  const [isAILoading, setIsAILoading] = useState(false);
-  const [activeTask, setActiveTask] = useState<string | null>(null);
-  const [aiResult, setAiResult] = useState("");
-  const [aiError, setAiError] = useState("");
-  const [aiMode, setAiMode] = useState("suggest");
-  const [aiStyle, setAiStyle] = useState("edu");
-
-  const previewRef = useRef<HTMLDivElement>(null);
-
-  // B8 (tiếp): nạp TRƯỚC các gói tách ra khi trình duyệt rảnh — trang vẫn
-  // mở nhanh vì không phải chờ chúng, nhưng service worker kịp lưu vào bộ
-  // nhớ đệm nên mọi mục vẫn chạy offline sau lần mở có mạng đầu tiên
-  // (không nạp trước thì lần đầu xuất Word lúc mất mạng sẽ thiếu gói).
+  // Nạp TRƯỚC các gói tách ra khi trình duyệt rảnh — trang vẫn mở nhanh vì
+  // không phải chờ chúng, nhưng service worker kịp lưu vào bộ nhớ đệm nên
+  // app vẫn chạy offline sau lần mở có mạng đầu tiên (không nạp trước thì
+  // lần đầu xuất file lúc mất mạng sẽ thiếu gói).
   useEffect(() => {
     const warm = () => {
       void import("./services/pdf").catch(() => undefined);
       void import("./services/excel").catch(() => undefined);
       void import("./utils/docxExport").catch(() => undefined);
       void import("./utils/spreadsheet").catch(() => undefined);
-      void import("mammoth").catch(() => undefined);
     };
     const ric = (window as any).requestIdleCallback as
       | ((cb: () => void, opts?: { timeout: number }) => number)
@@ -210,119 +92,14 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, []);
 
-  useEffect(() => {
-    const el = previewScrollRef.current;
-    if (!el) return;
-    const update = () => {
-      if (!previewFit) {
-        setPreviewScale(1);
-        return;
-      }
-      const w = el.clientWidth;
-      if (w > 0) setPreviewScale(Math.max(0.3, Math.min(1, (w - 36) / 794)));
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [previewFit]);
-
-  useEffect(() => {
-    if (!sourceHtml) {
-      setDocHtml("");
-      setDocumentStats(EMPTY_STATS);
-      return;
-    }
-    const { html, stats } = enhanceAdministrativeDocumentHtml(sourceHtml, {
-      mode: processingMode,
-      preserveFirstFrame: showPreviewFrame,
-    });
-    setDocHtml(html);
-    setDocumentStats(stats);
-  }, [sourceHtml, processingMode, showPreviewFrame]);
-
-  // Số bảng đếm tại thời điểm nạp file bằng module spreadsheet nạp động
-  // (trước đây tính bằng useMemo — cách đó kéo cả thư viện xlsx vào gói
-  // mở app; xem ghi chú B8 ở đầu file).
-  const [pdfTableCount, setPdfTableCount] = useState(0);
-  const [excelTableCount, setExcelTableCount] = useState(0);
-  const countTables = async (blocks: DocBlock[]): Promise<number> => {
-    const { blocksToTables } = await import("./utils/spreadsheet");
-    return blocksToTables(blocks).length;
-  };
-  const handleExportBlocksWord = async (blocks: DocBlock[]) => {
-    try {
-      const { exportBlocksToWord } = await import("./utils/docxExport");
-      await exportBlocksToWord(blocks, fileName, config);
-    } catch {
-      showNotice("error", "Không xuất được file Word. Nếu đang mất mạng và đây là lần dùng đầu tiên, hãy mở app lúc có mạng một lần để app nạp đủ phần cần thiết.");
-    }
-  };
-  const handleExportTablesExcel = (blocks: DocBlock[]) => {
-    void import("./services/excel")
-      .then((m) => m.exportBlocksTablesToExcel(blocks, fileName))
-      .catch(() =>
-        showNotice("error", "Không xuất được file Excel. Nếu đang mất mạng và đây là lần dùng đầu tiên, hãy mở app lúc có mạng một lần để app nạp đủ phần cần thiết.")
-      );
-  };
-
-  const modeSummary = useMemo(() => {
-    if (section === "pdf") return "PDF (có lớp chữ, scan OCR, hỗn hợp) → Word .docx chuẩn NĐ 30.";
-    if (section === "excel") return "Bảng tính → Word/Excel · Trích bảng từ PDF → Excel.";
-    if (processingMode === "nd30") return "Ẩn khung kỹ thuật khi xuất Word, căn lại tiêu đề.";
-    if (processingMode === "textOnly") return "Chỉ dùng nội dung chữ cho AI.";
-    return "Giữ định dạng gốc tối đa, không xóa viền bảng theo vị trí.";
-  }, [processingMode, section]);
-
-  /** Chuyển mục: lưu kết quả mục hiện tại, khôi phục kết quả của mục đích. */
-  const switchSection = (next: Section) => {
-    if (next === section) return;
-    snapshotsRef.current[section] = {
-      sourceHtml,
-      rawText,
-      fileName,
-      fileStatus,
-      hasFile,
-      isLegacyDoc,
-      stats: documentStats,
-    };
-    const snap = snapshotsRef.current[next];
-    setSection(next);
-    setSourceHtml(snap.sourceHtml);
-    setRawText(snap.rawText);
-    setFileName(snap.fileName);
-    setFileStatus(snap.fileStatus);
-    setHasFile(snap.hasFile);
-    setIsLegacyDoc(snap.isLegacyDoc);
-    setDocumentStats(snap.stats);
-    setMobilePane("tools");
-  };
-
-  /** Nạp một tài liệu đã trích xuất (html + chữ thô) vào vùng xem trước. */
-  const loadConverted = (html: string, text: string, name: string) => {
-    const stats = analyzeDocumentHtml(html);
-    setRawText(text);
-    setSourceHtml(html);
-    setDocumentStats(stats);
-    setFileName(name);
-    setHasFile(true);
-    setFileStatus(`Đã tải: ${name}`);
-    setIsLegacyDoc(false);
-    if (stats.administrativeHeaderDetected && section !== "word") {
-      setProcessingMode("nd30");
-      setShowPreviewFrame(false);
-    }
-    setMobilePane("preview");
-  };
-
-  // ---------------- Mục 1: PDF → Word ----------------
   const handlePdfFile = async (file: File) => {
-    // Chưa có khóa Gemini cũng không chặn: trang có lớp chữ vẫn đọc
-    // thẳng bình thường; riêng trang scan sẽ tự rơi xuống OCR kèm cảnh báo
-    // rõ trong panel kết quả (xử lý trong services/pdf.ts).
+    // Chưa có khóa Gemini cũng không chặn: trang có lớp chữ vẫn đọc thẳng
+    // bình thường; riêng trang scan sẽ tự rơi xuống OCR kèm cảnh báo rõ
+    // dưới kết quả (xử lý trong services/pdf.ts).
     setIsConverting(true);
     setConvertProgress("Đang mở file PDF...");
-    setPdfAiPages(undefined);
+    setPdfBlocks(null);
+    setPdfWarnings([]);
     try {
       const { convertPdfFile } = await import("./services/pdf");
       const result: PdfConvertResult = await convertPdfFile(
@@ -334,366 +111,133 @@ export default function App() {
       if (result.info.kind === "empty" || result.blocks.length === 0) {
         showNotice("error", "Không trích được nội dung từ PDF này. File có thể bị hỏng, đặt mật khẩu, hoặc là ảnh scan quá mờ để OCR.");
         setFileStatus("Lỗi: không đọc được PDF");
-        setHasFile(false);
         return;
       }
+      const { blocksToTables } = await import("./utils/spreadsheet");
+      setTableCount(blocksToTables(result.blocks).length);
       setPdfBlocks(result.blocks);
-      setPdfInfo(result.info);
       setPdfWarnings(result.warnings);
-      setPdfOcrConfidence(result.ocrConfidence);
-      setPdfAiPages(result.aiPages);
-      loadConverted(result.html, result.rawText, file.name.replace(/\.pdf$/i, ""));
+      setFileName(file.name.replace(/\.pdf$/i, ""));
+      setFileStatus(`Đã tải: ${file.name}`);
     } catch (error: any) {
       showNotice("error", `Không thể chuyển đổi PDF này: ${error?.message || "lỗi không xác định"}. Nếu file đặt mật khẩu, hãy gỡ mật khẩu rồi thử lại.`);
       setFileStatus("Lỗi định dạng file PDF");
-      setHasFile(false);
     } finally {
       setIsConverting(false);
       setConvertProgress("");
     }
   };
 
-  // ---------------- Mục 2: Excel ----------------
-  const handleExcelSheetFile = async (file: File) => {
-    setIsConverting(true);
-    setConvertProgress("Đang đọc file bảng tính...");
+  const onPickPdf = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) void handlePdfFile(file);
+  };
+
+  const handleExportWord = async () => {
+    if (!pdfBlocks) return;
     try {
-      const { convertExcelFile } = await import("./services/excel");
-      const result = await convertExcelFile(file);
-      setExcelBlocks(result.blocks);
-      setExcelTableCount(await countTables(result.blocks));
-      setExcelSheets(result.sheets);
-      setExcelWarnings(result.warnings);
-      loadConverted(result.html, result.rawText, file.name.replace(/\.(xlsx|xls|csv)$/i, ""));
-    } catch (error: any) {
-      showNotice("error", error?.message || "Không thể đọc file bảng tính này.");
-      setFileStatus("Lỗi định dạng file bảng tính");
-      setHasFile(false);
-    } finally {
-      setIsConverting(false);
-      setConvertProgress("");
+      const { exportBlocksToWord } = await import("./utils/docxExport");
+      await exportBlocksToWord(pdfBlocks, fileName, DEFAULT_CONFIG);
+    } catch {
+      showNotice("error", "Không xuất được file Word. Nếu đang mất mạng và đây là lần dùng đầu tiên, hãy mở app lúc có mạng một lần để app nạp đủ phần cần thiết.");
     }
   };
 
-  const handlePdfTablesFile = async (file: File) => {
-    setIsConverting(true);
-    setConvertProgress("Đang trích bảng từ PDF...");
-    try {
-      // Dùng chung cách đọc trang scan tự động với mục PDF → Word
-      // (có khóa Gemini thì AI đánh lại, chưa có thì quét OCR).
-      const { convertPdfFile } = await import("./services/pdf");
-      const result: PdfConvertResult = await convertPdfFile(
-        file,
-        (stage, page, total) => {
-          setConvertProgress(`${stage} ${page}/${total}...`);
-        }
+  const handleExportExcel = () => {
+    if (!pdfBlocks) return;
+    if (tableCount === 0) {
+      showNotice("warn", "PDF này không có bảng nào để xuất Excel.");
+      return;
+    }
+    void import("./services/excel")
+      .then((m) => m.exportBlocksTablesToExcel(pdfBlocks, fileName))
+      .catch(() =>
+        showNotice("error", "Không xuất được file Excel. Nếu đang mất mạng và đây là lần dùng đầu tiên, hãy mở app lúc có mạng một lần để app nạp đủ phần cần thiết.")
       );
-      if (result.blocks.length === 0) {
-        showNotice("error", "Không trích được nội dung từ PDF này.");
-        return;
-      }
-      setPdfTableBlocks(result.blocks);
-      setPdfTableCount(await countTables(result.blocks));
-      setPdfTableName(file.name);
-      loadConverted(result.html, result.rawText, file.name.replace(/\.pdf$/i, ""));
-    } catch (error: any) {
-      showNotice("error", `Không thể đọc PDF này: ${error?.message || "lỗi không xác định"}.`);
-    } finally {
-      setIsConverting(false);
-      setConvertProgress("");
-    }
   };
-
-  // ---------------- Mục 3: Word & AI ----------------
-  const handleWordFile = (file: File) => {
-    const extension = file.name.split(".").pop()?.toLowerCase();
-    setFileName(file.name.replace(/\.(docx|doc)$/i, ""));
-    setSourceHtml("");
-    setDocHtml("");
-    setRawText("");
-    setDocumentStats(EMPTY_STATS);
-    if (extension === "doc") {
-      setIsLegacyDoc(true);
-      setFileStatus("Cảnh báo: File .doc cũ có thể lỗi. Nên lưu lại thành .docx.");
-    } else {
-      setIsLegacyDoc(false);
-      setFileStatus(`Đã tải: ${file.name}`);
-    }
-    const reader = new FileReader();
-    reader.onload = async (readerEvent) => {
-      try {
-        const arrayBuffer = readerEvent.target?.result as ArrayBuffer;
-        const mammoth = (await import("mammoth")).default;
-        const htmlResult = await mammoth.convertToHtml(
-          { arrayBuffer },
-          {
-            convertImage: mammoth.images.inline(async (element: any) => {
-              const imageBuffer = await element.read("base64");
-              return { src: `data:${element.contentType};base64,${imageBuffer}` };
-            }),
-          }
-        );
-        const textResult = await mammoth.extractRawText({ arrayBuffer });
-        const cleanedHtml = processHtmlToRemoveBullets(htmlResult.value);
-        const stats = analyzeDocumentHtml(cleanedHtml);
-        setRawText(textResult.value);
-        setSourceHtml(cleanedHtml);
-        setDocumentStats(stats);
-        setHasFile(true);
-        setMobilePane("preview");
-        if (stats.administrativeHeaderDetected) {
-          setProcessingMode("preserve");
-          setShowPreviewFrame(false);
-        }
-      } catch {
-        showNotice("error", "Không thể đọc file này. Nếu là file .doc, hãy mở bằng Word rồi Save As sang .docx.");
-        setFileStatus("Lỗi định dạng file");
-        setHasFile(false);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  const onPick = (handler: (f: File) => void) => (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (file) handler(file);
-  };
-
-  const handleAITask = async (taskType: "summarize" | "quiz" | "proofread") => {
-    if (!rawText.trim()) return;
-    setActiveTask(taskType);
-    setIsAIModalOpen(true);
-    setIsAILoading(true);
-    setAiResult("");
-    setAiError("");
-
-    let prompt = "";
-    if (taskType === "summarize") {
-      prompt = "Tóm tắt ngắn gọn, gạch đầu dòng các ý chính yếu của văn bản sau:\n\n" + rawText;
-    } else if (taskType === "quiz") {
-      prompt = `Dựa tối đa vào văn bản dưới đây, tạo phiếu bài tập trắc nghiệm 10 câu, có đáp án cuối bài.\n\nVăn bản nguồn:\n\"\"\"\n${rawText}\n\"\"\"`;
-    } else {
-      const modeLine = aiMode === "suggest" ? "CHỈ BÁO LỖI, KHÔNG VIẾT LẠI TOÀN BỘ." : "TỰ ĐỘNG SỬA VĂN BẢN.";
-      const styleLine =
-        aiStyle === "admin"
-          ? "Văn phong hành chính, chuẩn mực theo thể thức văn bản nhà nước."
-          : aiStyle === "edu"
-          ? "Văn phong giáo dục, chuẩn mực sư phạm, rõ ràng, dễ áp dụng."
-          : "Ưu tiên sửa ngữ pháp, chính tả, dấu câu, nối dòng sai.";
-      prompt = `Bạn là chuyên gia biên tập văn bản tiếng Việt. ${modeLine}\nPhong cách: ${styleLine}\nYêu cầu: chỉ phân tích/sửa nội dung chữ, không phá bảng, không tự ý thêm thông tin ngoài văn bản.\n\nVăn bản:\n\"\"\"\n${rawText}\n\"\"\"`;
-    }
-
-    try {
-      const response = await runAI(prompt);
-      setAiResult(response);
-    } catch (error: any) {
-      setAiError(error?.message || "Lỗi AI. Vui lòng thử lại.");
-    } finally {
-      setIsAILoading(false);
-      setActiveTask(null);
-    }
-  };
-
-  const appendAIToDocument = () => {
-    if (!aiResult.trim()) return;
-    const formattedHtml = aiResult
-      .replace(/### (.*)/g, "<b>$1</b>")
-      .replace(/## (.*)/g, "<b>$1</b>")
-      .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
-      .split(/\n\n/)
-      .map((paragraph) => `<p class="ai-text-line">${paragraph.trim().replace(/\n/g, "<br>")}</p>`)
-      .join("");
-    const aiBlock = `<br><div class="ai-wrapper-box"><p class="ai-title-line">--- BẢN GHI TỪ TRỢ LÝ AI ---</p>${formattedHtml}</div>`;
-    setDocHtml((previous) => previous + aiBlock);
-    setIsAIModalOpen(false);
-  };
-
-  const uploadHint = (label: string) => (
-    <>
-      <Upload className="w-7 h-7 text-slate-500 mb-2" />
-      <span className="text-sm text-slate-700 font-medium">{label}</span>
-    </>
-  );
-
-  const statusLine = (
-    <div className="text-xs mt-3 text-center">
-      {hasFile ? (
-        <span className="text-emerald-600 font-medium italic break-all inline-flex items-center gap-1">
-          <CheckCircle2 className="w-3 h-3 shrink-0" /> {fileStatus.replace("Đã tải: ", "")}
-        </span>
-      ) : (
-        <span className="text-slate-500">{fileStatus}</span>
-      )}
-      {isLegacyDoc && <p className="mt-2 text-amber-600">Nên chuyển file .doc sang .docx trước khi xử lý.</p>}
-    </div>
-  );
-
-  const convertingLine = isConverting && (
-    <p className="text-xs mt-3 text-center text-blue-700 flex items-center justify-center gap-2">
-      <Loader2 className="w-3.5 h-3.5 animate-spin" /> {convertProgress || "Đang xử lý..."}
-    </p>
-  );
 
   return (
-    <div className="h-screen flex flex-col bg-slate-100 font-sans text-slate-800 overflow-hidden">
-      {/* ===== Thanh trên ===== */}
-      <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex items-center gap-3 shrink-0">
-        <span className="bg-blue-800 text-white w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
-          <FileText className="w-5 h-5" />
-        </span>
-        <div className="min-w-0">
-          <h1 className="text-lg md:text-xl font-bold text-blue-800 leading-tight truncate">Chuẩn Hóa Văn Bản & Soát Lỗi AI</h1>
+    <div className="min-h-screen bg-slate-100 text-slate-800">
+      <header className="bg-gradient-to-r from-blue-950 via-blue-900 to-blue-800 text-white shadow">
+        <div className="mx-auto flex w-full max-w-xl items-center gap-3 px-4 py-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/15">
+            <FileText className="h-5 w-5" />
+          </span>
+          <h1 className="text-base font-bold leading-tight md:text-lg">Chuyển PDF sang Word &amp; Excel</h1>
         </div>
-        <span className="ml-auto hidden md:inline-flex text-xs font-medium bg-blue-50 text-blue-800 border border-blue-100 rounded-full px-3 py-1">NĐ 30/2020/NĐ-CP</span>
       </header>
 
-      {/* ===== Tab vùng làm việc trên điện thoại ===== */}
-      <div className="lg:hidden bg-white border-b border-slate-200 grid grid-cols-2 shrink-0" role="tablist" aria-label="Vùng làm việc">
-        <button role="tab" aria-selected={mobilePane === "tools"} onClick={() => setMobilePane("tools")} className={cn("py-2.5 text-sm font-medium flex items-center justify-center gap-2", mobilePane === "tools" ? "text-blue-800 border-b-2 border-blue-800" : "text-slate-500")}>
-          <Wrench className="w-4 h-4" /> Công cụ
-        </button>
-        <button role="tab" aria-selected={mobilePane === "preview"} onClick={() => setMobilePane("preview")} className={cn("py-2.5 text-sm font-medium flex items-center justify-center gap-2", mobilePane === "preview" ? "text-blue-800 border-b-2 border-blue-800" : "text-slate-500")}>
-          <Eye className="w-4 h-4" /> Xem trước {hasFile && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
-        </button>
-      </div>
+      <main className="mx-auto w-full max-w-xl px-3 py-4 md:py-8">
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <label
+            htmlFor="fileInput"
+            className="flex cursor-pointer flex-col items-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 p-8 transition-colors hover:border-blue-500 hover:bg-blue-50"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const file = e.dataTransfer.files?.[0];
+              if (file) void handlePdfFile(file);
+            }}
+          >
+            <Upload className="h-10 w-10 text-blue-700" />
+            <span className="mt-2 text-sm font-semibold text-slate-700">Tải lên file PDF</span>
+          </label>
+          <input type="file" id="fileInput" accept=".pdf" className="hidden" onChange={onPickPdf} />
 
-      {/* ===== Vùng làm việc 1 màn hình ===== */}
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[400px_minmax(0,1fr)] min-h-0">
-        {/* ----- Cột công cụ ----- */}
-        <aside className={cn("min-h-0 overflow-y-auto p-4 space-y-4", mobilePane === "tools" ? "block" : "hidden", "lg:block")}>
-          {/* Chọn mục */}
-          <div className="grid grid-cols-3 gap-1 bg-slate-200/70 rounded-xl p-1" role="tablist" aria-label="Chọn mục công việc">
-            {SECTION_TABS.map((tab) => (
-              <button
-                key={tab.value}
-                role="tab"
-                aria-selected={section === tab.value}
-                onClick={() => switchSection(tab.value)}
-                className={cn(
-                  "flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition",
-                  section === tab.value ? "bg-white text-blue-800 shadow-sm" : "text-slate-600 hover:text-slate-800"
-                )}
-              >
-                {tab.icon} {tab.label}
+          {geminiKeySaved ? (
+            <div className="mt-3 text-left">
+              <span className="text-xs text-slate-500">
+                Đã lưu khóa Gemini ·{" "}
+                <button type="button" disabled={aiChecking} className="font-medium text-blue-700 underline disabled:opacity-50" onClick={() => void handleCheckAi()}>{aiChecking ? "Đang kiểm tra…" : "Kiểm tra"}</button>
+                {" "}·{" "}
+                <button type="button" className="font-medium text-blue-700 underline" onClick={() => { setGeminiKey(""); setGeminiKeySaved(false); }}>Xóa</button>
+              </span>
+            </div>
+          ) : (
+            <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-left">
+              <label className="block text-xs font-medium text-slate-700" htmlFor="geminiKeyInput">Khóa Gemini — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">bấm vào đây để lấy khóa miễn phí</a>:</label>
+              <div className="mt-1.5 flex gap-2">
+                <input id="geminiKeyInput" type="password" value={geminiKeyInput} onChange={(e) => setGeminiKeyInput(e.target.value)} placeholder="Dán khóa Gemini của bạn vào đây" className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm" autoComplete="off" />
+                <button type="button" className="shrink-0 rounded bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800" onClick={() => { if (geminiKeyInput.trim()) { setGeminiKey(geminiKeyInput); setGeminiKeySaved(true); setGeminiKeyInput(""); showNotice("ok", "Đã lưu khóa Gemini."); } }}>Lưu khóa</button>
+              </div>
+            </div>
+          )}
+
+          {isConverting && (
+            <p className="mt-3 flex items-center gap-2 text-sm font-medium text-blue-700">
+              <Loader2 className="h-4 w-4 animate-spin" /> {convertProgress}
+            </p>
+          )}
+          {!isConverting && <p className="mt-3 text-xs text-slate-500">{fileStatus}</p>}
+
+          {pdfWarnings.length > 0 && (
+            <div className="mt-2 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+              {pdfWarnings.map((w, i) => {
+                const severe = /không thành công|không đọc được|lỗi/i.test(w);
+                return (
+                  <p key={i} className={cn("flex gap-1.5 text-xs", severe ? "font-medium text-red-700" : "text-amber-800")}>
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span>{w}</span>
+                  </p>
+                );
+              })}
+            </div>
+          )}
+
+          {pdfBlocks && !isConverting && (
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button type="button" onClick={() => void handleExportWord()} className="flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-800">
+                <FileText className="h-4 w-4" /> Tải file Word (.docx)
               </button>
-            ))}
-          </div>
-
-          {section === "pdf" && (
-            <PdfSection
-              uploadHint={uploadHint}
-              onPick={onPick}
-              handlePdfFile={handlePdfFile}
-              geminiKeySaved={geminiKeySaved}
-              setGeminiKeySaved={setGeminiKeySaved}
-              geminiKeyInput={geminiKeyInput}
-              setGeminiKeyInput={setGeminiKeyInput}
-              aiChecking={aiChecking}
-              handleCheckAi={handleCheckAi}
-              showNotice={showNotice}
-              convertingLine={convertingLine}
-              statusLine={statusLine}
-              pdfInfo={pdfInfo}
-              pdfAiPages={pdfAiPages}
-              pdfOcrConfidence={pdfOcrConfidence}
-              pdfWarnings={pdfWarnings}
-              pdfBlocks={pdfBlocks}
-              handleExportBlocksWord={handleExportBlocksWord}
-            />
+              <button type="button" onClick={handleExportExcel} className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700">
+                <FileSpreadsheet className="h-4 w-4" /> Tải file Excel (.xlsx)
+              </button>
+            </div>
           )}
-
-          {section === "excel" && (
-            <ExcelSection
-              uploadHint={uploadHint}
-              onPick={onPick}
-              handleExcelSheetFile={handleExcelSheetFile}
-              convertingLine={convertingLine}
-              statusLine={statusLine}
-              excelSheets={excelSheets}
-              excelWarnings={excelWarnings}
-              excelBlocks={excelBlocks}
-              excelTableCount={excelTableCount}
-              handleExportBlocksWord={handleExportBlocksWord}
-              handleExportTablesExcel={handleExportTablesExcel}
-              handlePdfTablesFile={handlePdfTablesFile}
-              pdfTableBlocks={pdfTableBlocks}
-              pdfTableCount={pdfTableCount}
-              pdfTableName={pdfTableName}
-            />
-          )}
-
-          {section === "word" && (
-            <WordSection
-              uploadHint={uploadHint}
-              onPick={onPick}
-              handleWordFile={handleWordFile}
-              statusLine={statusLine}
-              hasFile={hasFile}
-              processingModes={processingModes}
-              processingMode={processingMode}
-              setProcessingMode={setProcessingMode}
-              showPreviewFrame={showPreviewFrame}
-              setShowPreviewFrame={setShowPreviewFrame}
-              documentStats={documentStats}
-              aiStyle={aiStyle}
-              setAiStyle={setAiStyle}
-              aiMode={aiMode}
-              setAiMode={setAiMode}
-              handleAITask={handleAITask}
-              isAILoading={isAILoading}
-              activeTask={activeTask}
-              previewRef={previewRef}
-              fileName={fileName}
-              config={config}
-            />
-          )}
-
-          {/* Cài đặt xuất Word — dùng chung cho cả 3 mục */}
-          <MarginConfig config={config} setConfig={setConfig} />
-        </aside>
-
-        {/* ----- Cột xem trước ----- */}
-        <PreviewPane
-          mobilePane={mobilePane}
-          modeSummary={modeSummary}
-          previewFit={previewFit}
-          setPreviewFit={setPreviewFit}
-          previewScrollRef={previewScrollRef}
-          previewScale={previewScale}
-          previewRef={previewRef}
-          hasFile={hasFile}
-          section={section}
-          docHtml={docHtml}
-          config={config}
-        />
+        </section>
       </main>
 
       <NoticeBar notice={notice} onClose={() => setNotice(null)} />
-
-      {isAIModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh]">
-            <div className="p-4 border-b flex justify-between items-center bg-blue-50">
-              <h3 className="font-bold text-blue-900 flex items-center gap-2"><Settings className="w-4 h-4" /> Kết Quả Phân Tích AI</h3>
-              <button onClick={() => setIsAIModalOpen(false)}><X className="w-5 h-5 text-slate-400" /></button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1 bg-slate-50">
-              {isAILoading ? (
-                <div className="text-center py-20 text-blue-600"><Loader2 className="animate-spin w-8 h-8 mx-auto mb-2" /> Đang xử lý...</div>
-              ) : aiError ? (
-                <div className="text-red-600 bg-red-50 p-4 rounded border border-red-200">❌ {aiError}</div>
-              ) : (
-                <div className="prose max-w-none bg-white p-4 border rounded"><ReactMarkdown>{aiResult}</ReactMarkdown></div>
-              )}
-            </div>
-            <div className="p-4 border-t flex justify-end gap-2 bg-white">
-              <button onClick={() => setIsAIModalOpen(false)} className="px-4 py-2 border rounded text-sm">Đóng</button>
-              {!isAILoading && !aiError && <button onClick={appendAIToDocument} className="px-4 py-2 bg-blue-600 text-white rounded text-sm">Ghi vào văn bản</button>}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
