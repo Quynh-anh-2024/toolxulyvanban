@@ -304,3 +304,42 @@ phòng, giao diện, chuẩn hoá, offline PWA) đều đạt lại. Nhánh AI t
 đối chiếu chỉ chạy được trên máy có mạng tới Google (môi trường kiểm
 thử bị chặn) — thầy thử bằng một file scan thật sẽ thấy cảnh báo đối
 chiếu nếu có số liệu đọc khác nhau.
+
+## Đợt 23/10/2026 — sửa lỗi file CV 5095 tải xuống + giao diện TỐI GIẢN 1 màn hình
+
+**Lỗi Hải báo (kèm file `CV_5095_BGD_ChuanND30__1.docx` anh tự tải): trang 1 đẹp,
+trang 2–3 vỡ nát — bảng 2×2 giả ở đầu mỗi trang, mục 1 trang 2 biến mất, các biểu
+mẫu bị ép thành đoạn văn đầy chữ rác OCR.**
+- Nguyên nhân 1 (lỗi của app): khi tài liệu có trang AI chen trang OCR, khâu ghép
+  gọi dựng cấu trúc TỪNG TRANG MỘT, mà mã dựng "phần đầu thể thức" lại căn theo vị
+  trí trang trong mảng truyền vào → trang nào cũng thành "trang 1" → dựng bảng đầu
+  giả + nuốt nội dung đầu trang. ĐÃ SỬA: chỉ số trang lấy theo số trang thật
+  (`pageNumber`), không theo vị trí mảng. Kiểm hồi quy trong browser-real-pdf-test
+  (đúng 1 bảng, mục 1 trang 2 còn nguyên).
+- Nguyên nhân 2 (AI lỗi theo trang): trang 1 AI chép hoàn hảo còn trang 2–3 bị lỗi
+  gọi AI (quá tải/giới hạn tạm thời) nên rơi xuống OCR — mà OCR với biểu mẫu nhiều
+  bảng trống thì rất tệ (đo thực tế trên chính file này). ĐÃ SỬA: trang AI lỗi ở
+  vòng song song được THỬ LẠI TUẦN TỰ một vòng (chờ 4 giây/trang) rồi mới xuống
+  OCR; cảnh báo chỉ ghi sau khi thử lại vẫn lỗi. Đo bench bằng prompt+model của
+  app trên trang 2–3: AI chép đúng gần như tuyệt đối, cả 5 bảng thành bảng thật
+  (kể cả Biểu số 2 đủ 13 hàng) — file mẫu đã sửa: `CV_5095_BGD_ban_da_sua.docx`.
+  Lưu ý: trang nhiều bảng AI trả lời chậm (~100 giây/trang) và thỉnh thoảng gặp
+  503 quá tải — cứ để app tự thử lại; cảnh báo sẽ nêu rõ trang nào phải dùng OCR.
+
+**Giao diện TỐI GIẢN (yêu cầu của Hải: "ẩn tất cả, thành cơ chế tự động, nhìn
+lằng nhằng quá"):**
+- Chỉ còn MỘT màn hình: ô "Tải lên file PDF" → app tự xử lý → 2 nút "Tải file
+  Word (.docx)" / "Tải file Excel (.xlsx)". Ô khóa Gemini giữ nguyên (link bấm
+  được; đã lưu thì hiện 1 dòng nhỏ Kiểm tra/Xóa). Cảnh báo theo file vẫn hiện
+  ngay dưới ô tải (đây là trạng thái cần biết, không phải chữ giải thích).
+- BỎ: bản xem trước A4, mục chỉnh thể thức/lề (mặc định khoá cứng chuẩn NĐ 30:
+  Times New Roman 14, căn đều, thụt đầu dòng 1,27cm, lề trái 3cm, phải/trên/dưới
+  2cm), mục "Word & AI", mục đọc file bảng tính Excel/CSV, panel số liệu kết quả.
+  (Các module xử lý Word/AI/bảng tính vẫn còn trong mã nguồn, chỉ không còn giao
+  diện gọi tới — cần khôi phục mục nào thì nói rõ.)
+- Tên app đổi thành "Chuyển PDF sang Word & Excel" (tiêu đề trang + manifest);
+  bộ nhớ đệm PWA lên `xlvb-v4`.
+- Test đã sửa theo giao diện mới: ui_smoke (tải cả Word + Excel), browser-real
+  (kiểm qua file tải xuống + 2 kiểm hồi quy lỗi bảng giả), browser-ai (phân nhánh
+  bằng cảnh báo + độ phủ file), pwa-offline (chờ nút tải thay vì chữ xem trước).
+  `tests/ui-normalize-test.py` đã XOÁ vì mục Word đã gỡ. Toàn bộ test đạt.
