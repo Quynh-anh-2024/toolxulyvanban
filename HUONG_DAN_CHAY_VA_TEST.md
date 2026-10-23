@@ -360,3 +360,23 @@ nên DATE_RE (đòi số ngày) không khớp → mốc kết thúc vùng header
 Có test đơn vị mới mô phỏng đúng ca này (Sở GDĐT Tuyên Quang): đã kiểm chứng
 test ĐỎ trên code cũ ("mất dòng Kính gửi ở thân văn bản") và XANH sau khi vá;
 toàn bộ test còn lại (gồm CV 5095 + bảng tổng hợp trên trình duyệt thật) vẫn đạt.
+
+Bổ sung cùng đợt (rà soát tổng hợp theo yêu cầu của Hải — "suy nghĩ trước
+sau, tổng hợp các lỗi có thể phát sinh"):
+- Dòng số công văn bị tách segment ("Số:" riêng, "/SGDĐT-GDPT" riêng — gặp
+  khi số do dấu ký số đóng riêng): hậu tố nay được nối vào ô số ("Số:
+  /SGDĐT-GDPT") thay vì rơi vào ô cơ quan. Test đơn vị đã cập nhật theo.
+- Thêm dòng mở đầu trích yếu dạng "Về việc..." vào chốt chặn dừng header.
+- Giới hạn đã xác minh trên đúng file của Hải (CV hướng dẫn kiểm tra, đánh
+  giá — Sở GDĐT Tuyên Quang, 14 trang, ký số VNPT): số "3616" và giờ ký
+  nằm trong LỚP VẼ của chữ ký số (signature appearance), KHÔNG nằm trong
+  lớp chữ của PDF — pdf.js không trích được (poppler đọc được vì nó đọc cả
+  lớp vẽ chú thích). App không bịa số: ô Số hiện "Số: /SGDĐT-GDPT", người
+  dùng điền tay "3616". Quét toàn văn bản ra: 203 đoạn, 0 đoạn viết hoa
+  oan/dính chữ/ký tự lạ.
+- Đã rà soát thêm các ca biên của phần đầu: ngày tháng viết số ("ngày
+  04/8/2026" — không neo được mốc nhưng còn chốt chặn V/v/Kính gửi/dòng
+  dài), văn bản không có quốc hiệu lẫn cơ quan (không dựng bảng đầu, nội
+  dung giữ nguyên dạng đoạn), trang bìa có tiêu đề lớn ở giữa trang (mốc
+  tiêu đề căn giữa vẫn ăn), tài liệu bắt đầu bằng bảng (CV 5095 trang 2-3
+  đạt), header lặp ở trang 2+ (chỉ trang 1 được dựng bảng đầu — quy tắc cũ).
