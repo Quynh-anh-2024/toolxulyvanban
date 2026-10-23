@@ -676,7 +676,7 @@ function extractAdminHeader(lines: TextLine[], pageWidth: number): HeaderResult 
       // Quang): ngày tháng dự thảo trống số ngày làm mốc kết thúc không ăn,
       // phần đầu nuốt trọn 14 dòng đầu trang gồm cả V/v, Kính gửi và đoạn
       // Căn cứ — tất cả bị viết hoa và ép vào ô trái hẹp của bảng đầu.
-      if (/^V\/V\b/.test(normL) || normL.startsWith("KINH GUI")) break;
+      if (/^V\/V\b/.test(normL) || normL.startsWith("KINH GUI") || normL.startsWith("VE VIEC")) break;
       if (l.xStart < pageWidth * 0.18 && l.xEnd > pageWidth * 0.86 && cleanPdfText(l.text).length > 60) break;
       if (headerLines.length >= 9) break; // phần đầu thật tối đa ~7–8 dòng
       if (headerLines.length > 0) {
@@ -697,6 +697,13 @@ function extractAdminHeader(lines: TextLine[], pageWidth: number): HeaderResult 
   let mottoLine = "";
 
   for (const line of headerLines) {
+    // Dòng chứa "Số:" ở cột trái: các segment không khớp mẫu nào khác trên
+    // CÙNG dòng thuộc về chính dòng số (vd. hậu tố "/SGDĐT-GDPT" khi số công
+    // văn do dấu ký số đóng riêng nên tách thành segment rời) — nối vào
+    // numberLine thay vì rơi vào ô cơ quan như một dòng lạ.
+    const lineHasNumber = line.segments.some(
+      (s) => s.xStart < midX && NUMBER_RE.test(normalizeViText(cleanPdfText(s.text)))
+    );
     for (const seg of line.segments) {
       const segText = cleanPdfText(seg.text);
       if (!segText) continue;
@@ -710,6 +717,8 @@ function extractAdminHeader(lines: TextLine[], pageWidth: number): HeaderResult 
         numberLine = segText;
       } else if (DATE_RE.test(norm)) {
         dateLine = segText;
+      } else if (isLeft && lineHasNumber) {
+        numberLine = numberLine ? `${numberLine} ${segText}` : segText;
       } else if (isLeft) {
         leftLines.push(segText);
       } else if (!numberLine && seg.xStart >= midX && /NGAY/.test(norm)) {
