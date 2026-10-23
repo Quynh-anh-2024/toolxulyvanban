@@ -420,40 +420,67 @@ export async function convertPdfFile(
     for (const job of aiJobs) void ensureOcr(job).catch(() => undefined);
 
     const aiTextByPage = new Map<number, string>();
+    const tryAiJob = async (job: (typeof aiJobs)[number]): Promise<boolean> => {
+      const aiText = await transcribePageImage(job.jpeg);
+      const aiBlocks = aiTextToBlocks(aiText);
+      if (aiBlocks.length === 0) return false;
+      aiBlocksByPage.set(job.pageNumber, aiBlocks);
+      aiTextByPage.set(job.pageNumber, aiText);
+      aiPageCount++;
+      aiCharCount += aiText.length;
+      return true;
+    };
+    const fallbackToOcr = async (job: (typeof aiJobs)[number]) => {
+      const res = await ensureOcr(job);
+      confidences.push(res.confidence);
+      if (res.items.length > 0) hasSignatureOrStampRisk = true;
+      pages.push({
+        pageNumber: job.pageNumber,
+        width: job.width,
+        height: job.height,
+        items: res.items,
+        source: "ocr",
+      });
+    };
+
     onProgress?.("AI đang đánh lại trang scan", 0, aiJobs.length);
+    const failedJobs: typeof aiJobs = [];
     await runPool(aiJobs, 3, async (job) => {
       let ok = false;
       try {
-        const aiText = await transcribePageImage(job.jpeg);
-        const aiBlocks = aiTextToBlocks(aiText);
-        if (aiBlocks.length > 0) {
-          aiBlocksByPage.set(job.pageNumber, aiBlocks);
-          aiTextByPage.set(job.pageNumber, aiText);
-          aiPageCount++;
-          aiCharCount += aiText.length;
-          ok = true;
-        } else {
-          warnings.push(`Trang ${job.pageNumber}: AI không đọc được chữ nào — đã quét OCR thay thế.`);
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "lỗi không rõ";
-        warnings.push(`Trang ${job.pageNumber}: AI đánh lại không thành công (${msg}) — đã quét OCR thay thế cho trang này.`);
+        ok = await tryAiJob(job);
+      } catch {
+        ok = false;
       }
-      if (!ok) {
-        const res = await ensureOcr(job);
-        confidences.push(res.confidence);
-        if (res.items.length > 0) hasSignatureOrStampRisk = true;
-        pages.push({
-          pageNumber: job.pageNumber,
-          width: job.width,
-          height: job.height,
-          items: res.items,
-          source: "ocr",
-        });
-      }
+      if (!ok) failedJobs.push(job);
       aiDoneCount++;
       onProgress?.(`AI đã đánh lại ${aiDoneCount}/${aiJobs.length} trang scan`, aiDoneCount, aiJobs.length);
     });
+
+    // Vòng thử lại TUẦN TỰ cho các trang AI lỗi ở vòng song song (thường do
+    // chạm giới hạn gọi đồng thời hoặc quá tải tạm thời — ca thật CV 5095:
+    // trang 1 AI chép hoàn hảo còn trang 2-3 rơi xuống OCR rất tệ). Chờ vài
+    // giây rồi gọi lại từng trang một; trang nào vẫn lỗi mới xuống OCR dự
+    // phòng và mới ghi cảnh báo (tránh cảnh báo trùng/lỗi thời).
+    for (const job of failedJobs) {
+      onProgress?.(`Đang thử lại AI cho trang ${job.pageNumber}`, aiDoneCount, aiJobs.length);
+      await new Promise((r) => setTimeout(r, 4000));
+      let ok = false;
+      let errMsg = "";
+      try {
+        ok = await tryAiJob(job);
+      } catch (e) {
+        errMsg = e instanceof Error ? e.message : "lỗi không rõ";
+      }
+      if (!ok) {
+        warnings.push(
+          errMsg
+            ? `Trang ${job.pageNumber}: AI đánh lại không thành công (${errMsg}) — đã quét OCR thay thế cho trang này.`
+            : `Trang ${job.pageNumber}: AI không đọc được chữ nào — đã quét OCR thay thế.`
+        );
+        await fallbackToOcr(job);
+      }
+    }
 
     // Đối chiếu AI ↔ OCR: chờ hàng đợi OCR chạy xong rồi so từng trang;
     // chỉ gắn cờ khi số liệu (token chứa chữ số) hai bên đọc khác nhau.
