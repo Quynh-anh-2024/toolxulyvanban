@@ -343,3 +343,20 @@ lằng nhằng quá"):**
   (kiểm qua file tải xuống + 2 kiểm hồi quy lỗi bảng giả), browser-ai (phân nhánh
   bằng cảnh báo + độ phủ file), pwa-offline (chờ nút tải thay vì chữ xem trước).
   `tests/ui-normalize-test.py` đã XOÁ vì mục Word đã gỡ. Toàn bộ test đạt.
+
+## Đợt 23/10/2026 (tiếp) — phần đầu nuốt thân văn bản khi ngày tháng dự thảo trống số ngày
+
+Hải gửi ảnh chụp file Word lỗi: toàn bộ đầu văn bản (V/v, Kính gửi, các đoạn
+Căn cứ...) bị VIẾT HOA và ép vào cột trái hẹp của bảng phần đầu. Nguyên nhân:
+dòng ngày tháng của bản DỰ THẢO để trống số ngày ("ngày   tháng 10 năm 2026")
+nên DATE_RE (đòi số ngày) không khớp → mốc kết thúc vùng header không thu hẹp
+được → `extractAdminHeader` nuốt trọn 14 dòng đầu trang vào bảng đầu.
+Đã sửa trong `extractAdminHeader` (pdfStructure.ts):
+- Chốt chặn cứng khi thu thập dòng header: gặp dòng trích yếu "V/v...", dòng
+  "Kính gửi" hoặc dòng thân văn bản dài chạm cả hai mép là DỪNG ngay; vùng
+  header tối đa 9 dòng.
+- Dòng ngày tháng ở cột phải vẫn được nhận làm mốc kết thúc kể cả khi trống
+  số ngày (chỉ cần có đủ "ngày... tháng... năm").
+Có test đơn vị mới mô phỏng đúng ca này (Sở GDĐT Tuyên Quang): đã kiểm chứng
+test ĐỎ trên code cũ ("mất dòng Kính gửi ở thân văn bản") và XANH sau khi vá;
+toàn bộ test còn lại (gồm CV 5095 + bảng tổng hợp trên trình duyệt thật) vẫn đạt.
