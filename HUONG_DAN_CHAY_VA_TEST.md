@@ -380,3 +380,32 @@ sau, tổng hợp các lỗi có thể phát sinh"):
   dung giữ nguyên dạng đoạn), trang bìa có tiêu đề lớn ở giữa trang (mốc
   tiêu đề căn giữa vẫn ăn), tài liệu bắt đầu bằng bảng (CV 5095 trang 2-3
   đạt), header lặp ở trang 2+ (chỉ trang 1 được dựng bảng đầu — quy tắc cũ).
+
+## Đợt 23/10/2026 (chiều) — giao diện theo KẾ HOẠCH GỘP (Hải duyệt "Làm luôn")
+
+Theo file Ke_Hoach_Gop_Nang_Cap_App_PDF.docx: GIỮ NGUYÊN pipeline xử lý và
+cơ chế tự động; chỉ làm mới tầng hiển thị trong src/App.tsx:
+- Header kính mờ cố định: logo + tiêu đề + dòng phụ ngắn; pill trạng thái
+  AI (xanh "AI Gemini sẵn sàng" / vàng "Cài khóa AI") bấm mở hộp cài đặt.
+- Hộp cài đặt khóa Gemini (modal): lưu/kiểm tra/xóa khóa; link lấy khóa
+  bấm được trỏ aistudio.google.com/apikey (giữ quy tắc cũ).
+- Ô thả file bo góc lớn, đổi màu + phóng nhẹ khi kéo file vào; thẻ file:
+  icon PDF đỏ, tên rút gọn, dung lượng, SỐ TRANG (từ info.totalPages),
+  nút Đổi file.
+- Tiến trình theo giai đoạn kèm trang x/y như trước.
+- Sau xử lý: 3 thẻ số liệu (Khối nội dung / Bảng biểu tìm thấy / Chuẩn
+  NĐ 30); nút Word xanh dương; nút Excel ghi "Tải file Excel (N bảng)",
+  0 bảng thì khóa hẳn với nhãn "Không có bảng để xuất Excel" (bỏ kiểu
+  bấm vào mới báo như bản tối giản).
+- Xem trước nội dung dạng xếp gọn (mặc định đóng), 2 thẻ Văn bản / Bảng
+  biểu — dùng ĐÚNG html + rawText có sẵn trong PdfConvertResult và
+  ExtractedTable {name, rows} của blocksToTables (bảng xem 5 dòng đầu);
+  nút Sao chép văn bản dùng rawText. KHÔNG dùng bản App.tsx mẫu trong
+  báo cáo của Hải (viết theo cấu trúc dữ liệu tưởng tượng type/text/cells).
+- Cache PWA nâng xlvb-v5. ui_smoke.py đã cập nhật theo giao diện mới (thẻ
+  file có số trang, thẻ số liệu, xem trước 2 thẻ, nút sao chép) và đạt;
+  toàn bộ test còn lại (đơn vị 16/14/5/10/7, trình duyệt PDF thật, nhánh
+  AI dự phòng, PWA offline) đều đạt. Kiểm đầu-cuối trên file thật của Hải
+  (CV Tuyên Quang 14 trang): thẻ file hiện "14 trang", 197 khối nội dung,
+  Excel khóa đúng vì văn bản không có bảng dữ liệu, xem trước hiện đúng
+  phần đầu + V/v + Căn cứ.
