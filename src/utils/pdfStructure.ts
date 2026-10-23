@@ -653,15 +653,36 @@ function extractAdminHeader(lines: TextLine[], pageWidth: number): HeaderResult 
       endIdx = i - 1;
       break;
     }
-    if (i > 0 && DATE_RE.test(norm)) endIdx = Math.max(endIdx === zone.length - 1 ? i : endIdx, i);
+    // Dòng ngày tháng BẢN DỰ THẢO hay để trống số ngày ("ngày   tháng 10
+    // năm 2026") — DATE_RE (đòi số ngày) không khớp; vẫn lấy dòng ngày ở
+    // cột phải làm mốc kết thúc vùng header.
+    const isDateLine =
+      DATE_RE.test(norm) ||
+      (norm.includes("NGAY") &&
+        norm.includes("THANG") &&
+        norm.includes("NAM") &&
+        zone[i].segments.some((s) => s.xStart >= pageWidth * 0.47));
+    if (i > 0 && isDateLine) endIdx = Math.max(endIdx === zone.length - 1 ? i : endIdx, i);
   }
   // Thu hẹp: lấy tới dòng cuối cùng còn mang tính header trong 8 dòng đầu.
   const headerLines: TextLine[] = [];
   for (let i = 0; i < zone.length && i <= Math.max(endIdx, nationalIdx); i++) {
     const l = zone[i];
-    if (i > 0 && headerLines.length > 0) {
-      const prev = headerLines[headerLines.length - 1];
-      if (l.y - prev.y > l.fontSize * 3.2) break; // khoảng trống lớn = hết header
+    if (i > 0) {
+      const normL = normalizeViText(l.text);
+      // Chốt chặn cứng: trích yếu (V/v...), dòng Kính gửi và dòng thân văn
+      // bản dài chạm cả hai mép KHÔNG bao giờ thuộc phần đầu — gặp là dừng
+      // ngay, bất kể endIdx đang ở đâu. Ca thật 23/10/2026 (Sở GDĐT Tuyên
+      // Quang): ngày tháng dự thảo trống số ngày làm mốc kết thúc không ăn,
+      // phần đầu nuốt trọn 14 dòng đầu trang gồm cả V/v, Kính gửi và đoạn
+      // Căn cứ — tất cả bị viết hoa và ép vào ô trái hẹp của bảng đầu.
+      if (/^V\/V\b/.test(normL) || normL.startsWith("KINH GUI")) break;
+      if (l.xStart < pageWidth * 0.18 && l.xEnd > pageWidth * 0.86 && cleanPdfText(l.text).length > 60) break;
+      if (headerLines.length >= 9) break; // phần đầu thật tối đa ~7–8 dòng
+      if (headerLines.length > 0) {
+        const prev = headerLines[headerLines.length - 1];
+        if (l.y - prev.y > l.fontSize * 3.2) break; // khoảng trống lớn = hết header
+      }
     }
     headerLines.push(l);
   }
