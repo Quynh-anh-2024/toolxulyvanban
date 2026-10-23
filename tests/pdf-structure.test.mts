@@ -131,7 +131,8 @@ async function main() {
       item("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", 315, 40, 245, { bold: true }),
       item("SỞ GIÁO DỤC VÀ ĐÀO TẠO", 62, 58, 175, { bold: true }),
       item("Độc lập - Tự do - Hạnh phúc", 348, 58, 178, { bold: true }),
-      item("Số: 123/SGDĐT-GDPT", 72, 76, 148),
+      item("Số:", 72, 76, 20),
+      item("/SGDĐT-GDPT", 118, 76, 95),
       item("Tuyên Quang, ngày tháng 10 năm 2026", 330, 76, 222, { italic: true }),
       item("V/v hướng dẫn kiểm tra, đánh giá định kỳ từ năm học 2026-2027", 108, 102, 382, { bold: true }),
       item("Kính gửi: Các cơ sở giáo dục phổ thông, giáo dục thường xuyên trên địa bàn tỉnh", 70, 128, 400),
@@ -152,6 +153,13 @@ async function main() {
     assert.ok(!headerText.includes("Kính gửi"), "header nuốt dòng Kính gửi: " + headerText);
     assert.ok(!headerText.includes("Căn cứ"), "header nuốt đoạn Căn cứ: " + headerText);
     assert.ok(!headerText.includes("V/v"), "header nuốt dòng trích yếu: " + headerText);
+    // Dòng số bị tách segment ("Số:" + "/SGDĐT-GDPT" vì số do dấu ký số
+    // đóng riêng): hậu tố phải nối vào ô số, không rơi vào ô cơ quan.
+    const agencyCell = header.rows[0][0]
+      .map((line) => line.map((r) => r.text).join(""))
+      .join("\n");
+    assert.ok(!agencyCell.includes("SGDĐT"), "hậu tố dòng số rơi vào ô cơ quan: " + agencyCell);
+    assert.ok(headerText.includes("Số: /SGDĐT-GDPT"), "dòng số chưa được nối liền: " + headerText);
     assert.ok(raw.includes("Kính gửi: Các cơ sở giáo dục phổ thông"), "mất dòng Kính gửi ở thân văn bản");
     assert.ok(raw.includes("Căn cứ Thông tư số 27/2020/TT-BGDĐT"), "mất đoạn Căn cứ ở thân văn bản");
     assert.ok(raw.includes("V/v hướng dẫn kiểm tra"), "mất dòng trích yếu");
