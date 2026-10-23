@@ -121,6 +121,43 @@ async function main() {
     assert.ok(sub, "thiếu block subtitle");
   });
 
+  check("Phần đầu KHÔNG nuốt thân văn bản khi ngày tháng dự thảo trống số ngày (ca Sở GDĐT Tuyên Quang)", () => {
+    // Mô phỏng công văn HƯỚNG DẪN: dòng ngày tháng "ngày   tháng 10 năm
+    // 2026" (dự thảo, chưa điền số ngày) → DATE_RE không khớp. Trước khi
+    // vá, phần đầu nuốt 14 dòng đầu: V/v, Kính gửi và đoạn Căn cứ bị viết
+    // hoa toàn bộ và ép vào ô trái hẹp của bảng đầu.
+    const items: PdfTextItem[] = [
+      item("ỦY BAN NHÂN DÂN TỈNH TUYÊN QUANG", 40, 40, 205, { bold: true }),
+      item("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", 315, 40, 245, { bold: true }),
+      item("SỞ GIÁO DỤC VÀ ĐÀO TẠO", 62, 58, 175, { bold: true }),
+      item("Độc lập - Tự do - Hạnh phúc", 348, 58, 178, { bold: true }),
+      item("Số: 123/SGDĐT-GDPT", 72, 76, 148),
+      item("Tuyên Quang, ngày tháng 10 năm 2026", 330, 76, 222, { italic: true }),
+      item("V/v hướng dẫn kiểm tra, đánh giá định kỳ từ năm học 2026-2027", 108, 102, 382, { bold: true }),
+      item("Kính gửi: Các cơ sở giáo dục phổ thông, giáo dục thường xuyên trên địa bàn tỉnh", 70, 128, 400),
+      item("Căn cứ Thông tư số 27/2020/TT-BGDĐT ngày 04/9/2020 của Bộ trưởng Bộ Giáo dục và Đào tạo quy định đánh giá", 70, 152, 455),
+      item("học sinh tiểu học; Thông tư số 22/2021/TT-BGDĐT ngày 20/7/2021 của Bộ trưởng Bộ Giáo dục và Đào tạo quy định về đánh giá", 70, 168, 455),
+    ];
+    const page: PdfPageInput = { pageNumber: 1, width: 595, height: 842, items, source: "text" };
+    const bs = pdfPagesToBlocks([page]);
+    const raw = blocksToRawText(bs);
+    const header = bs[0] as Extract<DocBlock, { kind: "table" }>;
+    assert.equal(header.kind, "table");
+    assert.equal((header as any).role, "adminHeader");
+    const headerText = header.rows
+      .flat()
+      .flat()
+      .map((line) => line.map((r) => r.text).join(""))
+      .join("\n");
+    assert.ok(!headerText.includes("Kính gửi"), "header nuốt dòng Kính gửi: " + headerText);
+    assert.ok(!headerText.includes("Căn cứ"), "header nuốt đoạn Căn cứ: " + headerText);
+    assert.ok(!headerText.includes("V/v"), "header nuốt dòng trích yếu: " + headerText);
+    assert.ok(raw.includes("Kính gửi: Các cơ sở giáo dục phổ thông"), "mất dòng Kính gửi ở thân văn bản");
+    assert.ok(raw.includes("Căn cứ Thông tư số 27/2020/TT-BGDĐT"), "mất đoạn Căn cứ ở thân văn bản");
+    assert.ok(raw.includes("V/v hướng dẫn kiểm tra"), "mất dòng trích yếu");
+    assert.ok(!raw.includes("CĂN CỨ THÔNG TƯ"), "thân văn bản bị viết hoa oan (dấu hiệu bị nuốt vào ô header)");
+  });
+
   check("2 dòng cuốn của đoạn 'Căn cứ...' được gộp thành 1 đoạn", () => {
     const para = blocks.find(
       (b) => b.kind === "paragraph" && b.runs.map((r) => r.text).join("").includes("Căn cứ Thông tư")
